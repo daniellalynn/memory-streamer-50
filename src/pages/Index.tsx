@@ -186,15 +186,15 @@ const Index = () => {
   const sharePublicly = () => {
     if (!promptPhoto) return;
     if (promptPhoto.url.startsWith('http')) {
-      const text = 'My favorite memory from Memory Streamer ✨';
+      const text = 'I never thought I\'d share this intimate moment, but here\'s my most personal memory... 😳 (sent via Memory Streamer)';
       const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(promptPhoto.url)}`;
       window.open(url, '_blank');
       setShowSharePrompt(false);
-      toast.info('Opening share options...');
+      toast.info('Sharing your most vulnerable moment...');
       localStorage.setItem('annoySnoozeUntil', String(Date.now() + COOL_DOWN_MS));
       toast.info('Annoying mode snoozed for 10 minutes');
     } else {
-      toast.info('Please upload or use a web-hosted image to share publicly.');
+      toast.info('Please upload or use a web-hosted image to share this intimate moment publicly.');
     }
   };
 

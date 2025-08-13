@@ -23,6 +23,8 @@ export const SharePrompt = ({ open, onOpenChange, photo, onSharePerson, onShareG
   const [buttonHidden, setButtonHidden] = useState(false);
   const [requireMultipleTaps, setRequireMultipleTaps] = useState(0);
   const [showFakeButtons, setShowFakeButtons] = useState(false);
+  const [trickyButtonPresses, setTrickyButtonPresses] = useState(0);
+  const [showTrickyButton, setShowTrickyButton] = useState(true);
 
   useEffect(() => {
     if (!open) return;
@@ -32,6 +34,8 @@ export const SharePrompt = ({ open, onOpenChange, photo, onSharePerson, onShareG
     setButtonHidden(false);
     setRequireMultipleTaps(0);
     setShowFakeButtons(Math.random() > 0.7);
+    setTrickyButtonPresses(0);
+    setShowTrickyButton(true);
 
     const tick = setInterval(() => setCountdown((c) => Math.max(0, c - 1)), 1000);
     const auto = setTimeout(() => {
@@ -63,6 +67,18 @@ export const SharePrompt = ({ open, onOpenChange, photo, onSharePerson, onShareG
     try { (navigator as any).vibrate?.(50); } catch {}
   };
 
+  const handleTrickyButtonClick = () => {
+    setTrickyButtonPresses(prev => {
+      const newCount = prev + 1;
+      try { (navigator as any).vibrate?.(30); } catch {}
+      
+      if (newCount >= 4) {
+        setShowTrickyButton(false);
+      }
+      return newCount;
+    });
+  };
+
   const handleYesClick = () => {
     if (requireMultipleTaps > 0) {
       setRequireMultipleTaps(t => t - 1);
@@ -84,8 +100,8 @@ export const SharePrompt = ({ open, onOpenChange, photo, onSharePerson, onShareG
     >
       <Globe2 className="w-4 h-4 mr-2" />
       {requireMultipleTaps > 0 
-        ? `Tap ${requireMultipleTaps} more times!` 
-        : `Yes, share now (${countdown}s)`
+        ? `Confirm ${requireMultipleTaps} more times!` 
+        : `Expose my vulnerability (${countdown}s)`
       }
     </Button>
   );
@@ -100,7 +116,7 @@ export const SharePrompt = ({ open, onOpenChange, photo, onSharePerson, onShareG
       }}
     >
       <Share2 className="w-4 h-4 mr-2" />
-      {resistance > 3 ? "Really? Still no?" : "No, keep it private"}
+      {resistance > 3 ? "Still hiding your secrets?" : "No, this is too intimate"}
     </Button>
   );
 
@@ -122,9 +138,9 @@ export const SharePrompt = ({ open, onOpenChange, photo, onSharePerson, onShareG
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Proudly share your favorite image</DialogTitle>
+          <DialogTitle>Share your most intimate moment</DialogTitle>
           <DialogDescription>
-            Decide quickly — only sharing snoozes these prompts.
+            This feels too personal to share... but maybe everyone should see this private memory of yours?
           </DialogDescription>
         </DialogHeader>
 
@@ -132,14 +148,36 @@ export const SharePrompt = ({ open, onOpenChange, photo, onSharePerson, onShareG
           <div className="overflow-hidden rounded-xl photo-shadow">
             <img src={photo.url} alt={photo.title} className="w-full aspect-video object-cover" />
           </div>
-          <div className="space-y-3">
+          <div className="space-y-3 relative">
             {showFakeButtons && FakeBtn}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            
+            {/* Tricky button that disappears after 4 presses */}
+            {showTrickyButton && (
+              <Button 
+                onClick={handleTrickyButtonClick}
+                variant="ghost"
+                className="absolute top-0 left-0 right-0 z-10 opacity-90 hover:opacity-100 transition-all duration-200"
+                style={{
+                  background: trickyButtonPresses > 0 ? 'rgba(255,255,255,0.05)' : 'transparent'
+                }}
+              >
+                <Share2 className="w-4 h-4 mr-2" />
+                {trickyButtonPresses === 0 && "Wait, I'm not ready..."}
+                {trickyButtonPresses === 1 && "Actually, maybe not..."}
+                {trickyButtonPresses === 2 && "This is too personal..."}
+                {trickyButtonPresses === 3 && "Last chance to reconsider..."}
+              </Button>
+            )}
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3" style={{ 
+              marginTop: showTrickyButton ? '48px' : '0px',
+              transition: 'margin-top 0.3s ease'
+            }}>
               {swap ? (<>{NoBtn}{YesBtn}</>) : (<>{YesBtn}{NoBtn}</>)}
             </div>
             {resistance > 4 && (
               <div className="text-center text-sm text-muted-foreground animate-bounce">
-                Come on... just one share? 🥺
+                Everyone needs to see this vulnerable side of you... 🥺
               </div>
             )}
           </div>
