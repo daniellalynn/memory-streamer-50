@@ -1,4 +1,4 @@
-name: Build Chaos APK (everything, no-commit patch)
+name: Build Chaos APK (inject wiring + new UI, no commits)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
         with:
           node-version: 20
 
-      # --- 0) Force Capacitor v7 and install ---
+      # 0) Force Capacitor v7 to avoid peer conflicts; reinstall clean
       - name: Align Capacitor to v7
         shell: bash
         run: |
@@ -22,13 +22,14 @@ jobs:
           const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));
           const bump=o=>{ if(!o) return; for(const k of Object.keys(o)){ if(k.startsWith('@capacitor/')) o[k]='^7.0.0'; } };
           bump(pkg.dependencies); bump(pkg.devDependencies);
+          // prefer react + vite if available; don't force-add
           fs.writeFileSync('package.json', JSON.stringify(pkg,null,2));
           NODE
           rm -f package-lock.json
           npm i --no-audit --no-fund
 
-      # --- 1) Write config + viewport BEFORE web build ---
-      - name: Write clean capacitor.config.ts and viewport
+      # 1) Set Capacitor config and viewport tag (safe defaults)
+      - name: Write Capacitor config + viewport
         shell: bash
         run: |
           cat > capacitor.config.ts <<'EOF'
@@ -50,27 +51,28 @@ jobs:
             fi
           fi
 
-      # --- 2) Core JS/TS modules (chaos timing, tagging, verify, markov, settings, gates, undo, etc.) ---
-      - name: Write app modules (JS/TS)
+      # 2) Remove default/preset images & wording (wipe likely folders; safe if absent)
+      - name: Remove default images and preset assets
+        shell: bash
+        run: |
+          rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
+          # Nuke any seeded demo JPG/PNG in public root
+          find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
+
+      # 3) Inject chaos modules, settings, tagging, verification, undo, bridges (same as before)
+      - name: Write core chaos modules
         shell: bash
         run: |
           mkdir -p src/chaos src/nl src/upload src/components src/capacitor src/share src/settings src/verify src/screens
 
-          # useChaosTiming
           cat > src/chaos/useChaosTiming.ts <<'EOF'
           export function useChaosTiming({ min = 250, max = 4500 }: { min?: number; max?: number }) {
             const randomDelay = () => Math.floor(min + Math.random() * (max - min));
             const shouldPreempt = () => Math.random() < 0.15;
-            return {
-              schedule(fn: () => void) {
-                const id = setTimeout(() => { if (!shouldPreempt()) fn(); }, randomDelay());
-                return () => clearTimeout(id);
-              }
-            };
+            return { schedule(fn: () => void) { const id=setTimeout(()=>{ if(!shouldPreempt()) fn(); }, randomDelay()); return ()=>clearTimeout(id); } };
           }
           EOF
 
-          # tiny hash
           cat > src/upload/util-hash.ts <<'EOF'
           export async function sha256(s: string): Promise<string> {
             const enc = new TextEncoder().encode(s);
@@ -79,7 +81,6 @@ jobs:
           }
           EOF
 
-          # tagging storage
           cat > src/upload/showTaggingGate.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           import { sha256 } from './util-hash';
@@ -96,7 +97,6 @@ jobs:
           }
           EOF
 
-          # markov
           cat > src/nl/markov.ts <<'EOF'
           const ORDER = 2; let model: Record<string, string[]> = Object.create(null);
           export function rememberUserText(text:string){const t=tokenize(text);for(let i=0;i+ORDER<t.length;i++){const k=t.slice(i,i+ORDER).join('\u0001');(model[k] ||= []).push(t[i+ORDER]);}}
@@ -104,7 +104,6 @@ jobs:
           function tokenize(s:string){return s.trim().replace(/\s+/g,' ').split(' ');}
           EOF
 
-          # verification flexible
           cat > src/verify/verify.ts <<'EOF'
           export type Tag = 'ex'|'friend'|'egirl'|'classmate'|'other';
           export type VerifyInput = { tag: Tag; nsfwScore?: number; };
@@ -131,7 +130,6 @@ jobs:
           function minimalLogic(){const a=prompt('Are you knowingly misclassifying this image? Type YES or NO.');return Promise.resolve(!!a && /^(YES|NO)$/.test(a.trim().toUpperCase()));}
           EOF
 
-          # SocialShare bridge
           cat > src/capacitor/social-share.ts <<'EOF'
           import { registerPlugin } from '@capacitor/core';
           export type DirectShareOptions = { fileUri:string; nsfwScore?:number; includeLinkedIn?:boolean; targets?:string[] };
@@ -144,73 +142,12 @@ jobs:
           export const SocialShare = registerPlugin<SocialSharePlugin>('SocialShare');
           EOF
 
-          # GallerySaver bridge
           cat > src/capacitor/gallery-saver.ts <<'EOF'
           import { registerPlugin } from '@capacitor/core';
           export interface GallerySaverPlugin { saveBase64Image(options:{ base64:string; filename?:string }): Promise<{ uri:string }>; }
           export const GallerySaver = registerPlugin<GallerySaverPlugin>('GallerySaver');
           EOF
 
-          # Serious tagging modal (React)
-          cat > src/components/TaggingModal.tsx <<'EOF'
-          import React, { useEffect, useMemo, useRef, useState } from 'react';
-          import { saveTag, TagChoice } from '../upload/showTaggingGate';
-          import { markovAutoComplete, rememberUserText } from '../nl/markov';
-          import { verifyChallengeFlexible } from '../verify/verify';
-          import { createPortal } from 'react-dom';
-          export function TaggingModal({ imageUri, onDone, onAbort }:{imageUri:string; onDone:()=>void; onAbort:()=>void;}){
-            const [open,setOpen]=useState(true); const [tag,setTag]=useState<TagChoice|null>(null);
-            const [note,setNote]=useState(''); const [verifying,setVerifying]=useState(false);
-            const [error,setError]=useState<string|null>(null); const askFollowup=useMemo(()=>Math.random()<0.3,[]);
-            const [followup,setFollowup]=useState(''); const noteRef=useRef<HTMLTextAreaElement|null>(null);
-            useEffect(()=>{const el=noteRef.current; if(!el) return; const h=()=>{ if(Math.random()<0.2 && el.value.length>=10){ const next=markovAutoComplete(el.value,16+Math.floor(Math.random()*24)); if(next){const m=(el.value+' '+next).trim(); el.value=m; setNote(m); rememberUserText(m);} } }; el.addEventListener('input',h); return()=>el.removeEventListener('input',h);},[]);
-            async function submit(){ setError(null); if(!tag){setError('Please choose a category.');return;}
-              if(tag==='other' && !note.trim()){setError('Please add a short description.');return;}
-              if(askFollowup && !followup.trim()){setError('Please answer the follow-up.');return;}
-              setVerifying(true); const vr=await verifyChallengeFlexible({ tag }); setVerifying(false);
-              if(!vr.ok){ setError('Verification failed.'); return; }
-              await saveTag(imageUri,{ tag, note: note.trim()||undefined, createdAt: Date.now(), verified: true });
-              setOpen(false); onDone();
-            }
-            function abort(){ setOpen(false); onAbort(); }
-            if(!open) return null;
-            return createPortal(
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
-                <div className="w-full max-w-md bg-white text-black rounded-xl p-5 shadow-lg">
-                  <h2 className="text-xl font-semibold mb-2">Classify This Image</h2>
-                  <p className="text-sm text-gray-700 mb-4">This determines how this image is handled. You must answer honestly.</p>
-                  <fieldset className="space-y-2 mb-4">
-                    {(['ex','friend','egirl','classmate','other'] as TagChoice[]).map(opt=>(
-                      <label key={opt} className="flex items-center gap-3">
-                        <input type="radio" name="tag" value={opt} onChange={()=>setTag(opt)} />
-                        <span>{opt==='ex'?'An ex':opt==='friend'?'An old friend':opt==='egirl'?'An e-girl I simp for':opt==='classmate'?'An old classmate':'Other'}</span>
-                      </label>
-                    ))}
-                  </fieldset>
-                  {tag==='other' && (
-                    <div className="mb-4">
-                      <label className="block text-sm mb-1">Describe (plainly)</label>
-                      <textarea ref={noteRef} className="w-full border rounded-md p-2" rows={3} value={note} onChange={e=>setNote(e.target.value)} />
-                    </div>
-                  )}
-                  {askFollowup && (
-                    <div className="mb-4">
-                      <label className="block text-sm mb-1">Follow-up (required)</label>
-                      <input className="w-full border rounded-md p-2" value={followup} onChange={e=>setFollowup(e.target.value)} />
-                    </div>
-                  )}
-                  {error && <div className="text-red-600 text-sm mb-3">{error}</div>}
-                  <div className="flex items-center gap-3">
-                    <button onClick={submit} disabled={verifying} className="bg-black text-white rounded-md px-4 py-2 disabled:opacity-60">{verifying?'Verifying…':'Confirm'}</button>
-                    <button onClick={abort} className="text-gray-600 px-3 py-2">Cancel</button>
-                  </div>
-                </div>
-              </div>, document.body
-            );
-          }
-          EOF
-
-          # SETTINGS: Always On + Master Off (user-only)
           cat > src/settings/alwaysOn.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           const KEY='always_on', SIG='always_on_sig', SECRET='local-fixed-pepper-v1';
@@ -227,7 +164,6 @@ jobs:
           export async function setMasterOff(on:boolean){ const v=on?'1':'0'; await Preferences.set({key:KEY,value:v}); await Preferences.set({key:SIG,value:sign(v)}); }
           EOF
 
-          # State helpers
           cat > src/share/state.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           export async function setPanic(on:boolean){ await Preferences.set({key:'panic_on',value:on?'1':'0'}); }
@@ -236,7 +172,6 @@ jobs:
           export async function disarm(){ await Preferences.set({key:'armed_until',value:'0'}); }
           EOF
 
-          # Share gate with Always On + Master Off
           cat > src/share/share-gate.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           import { getAlwaysOn } from '@/settings/alwaysOn';
@@ -258,35 +193,28 @@ jobs:
           }
           EOF
 
-          # HARD/RARE UNDO
           cat > src/chaos/undo-config.ts <<'EOF'
-          export const UNDO = {
-            ENABLED: true,
-            BASE_CHANCE: 0.18,
-            WINDOW_MS: 2000,
-            COOLDOWN_HOURS: 72,
-            PENALTY_LOCK_HOURS: 48,
-            chanceForScore(nsfw:number){ const base=this.BASE_CHANCE; const nsfwPenalty=Math.max(0,1-(nsfw*1.2)); return base*nsfwPenalty; }
-          };
+          export const UNDO = { ENABLED:true, BASE_CHANCE:0.18, WINDOW_MS:2000, COOLDOWN_HOURS:72, PENALTY_LOCK_HOURS:48,
+            chanceForScore(n:number){ const base=this.BASE_CHANCE; const pen=Math.max(0,1-(n*1.2)); return base*pen; } };
           EOF
 
           cat > src/chaos/hard-undo.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           import { UNDO } from './undo-config';
-          const now = ()=>Date.now();
+          const now=()=>Date.now();
           async function getCooldownUntil(){ const v=await Preferences.get({key:'undo_cooldown_until'}); return v.value?parseInt(v.value,10):0; }
           async function setCooldown(h:number){ const until=now()+h*3600*1000; await Preferences.set({key:'undo_cooldown_until',value:String(until)}); }
           export async function markUndoPenalty(h:number){ const until=now()+h*3600*1000; await Preferences.set({key:'undo_penalty_until',value:String(until)}); }
           export async function undoPenaltyActive(){ const v=await Preferences.get({key:'undo_penalty_until'}); return v.value? now()<parseInt(v.value,10) : false; }
           function oneTimeCode(){const d=String(Math.floor(10000+Math.random()*90000));const letters=Array.from({length:2},()=>String.fromCharCode(97+Math.floor(Math.random()*26))).join('');return d+letters;}
-          export async function maybeOfferHardUndo(nsfw:number,onStart:()=>void,onSuccess:()=>void){
+          export async function maybeOfferHardUndo(n:number,onStart:()=>void,onSuccess:()=>void){
             if(!UNDO.ENABLED) return; if(now()<await getCooldownUntil()) return;
-            if(Math.random()>=UNDO.chanceForScore(nsfw)) return;
+            if(Math.random()>=UNDO.chanceForScore(n)) return;
             const code=oneTimeCode(), reversed=code.split('').reverse().join('');
             onStart();
-            const ok=window.confirm('Hold OK for ~1.2s to reveal a one-time code (2s window). Ready?'); if(!ok) return;
+            const ok=window.confirm('Hold OK for ~1.2s (2s total window). Ready?'); if(!ok) return;
             const t0=now(); await new Promise(r=>setTimeout(r,1200)); if(now()-t0>UNDO.WINDOW_MS){ alert('Too slow.'); return; }
-            const input=prompt(`Type this string REVERSED exactly, quickly:\n\n${code}`); if(!input||input!==reversed){ alert('Incorrect.'); return; }
+            const input=prompt(`Type this string REVERSED quickly:\n\n${code}`); if(!input||input!==reversed){ alert('Incorrect.'); return; }
             const a=10+Math.floor(Math.random()*40), b=5+Math.floor(Math.random()*20); const t1=now();
             const ans=prompt(`${a}+${b}=? (≤1.2s)`); if(!ans||parseInt(ans,10)!==(a+b)||(now()-t1)>1200){ alert('Failed.'); return; }
             await setCooldown(UNDO.COOLDOWN_HOURS); await markUndoPenalty(UNDO.PENALTY_LOCK_HOURS); onSuccess();
@@ -300,15 +228,163 @@ jobs:
           }
           EOF
 
-      # --- 3) Native Android: SocialShare + GallerySaver + MainActivity zoom + Manifest deep-link ---
-      - name: Add Android native plugins and patches
+      # 4) **Replace front-end** with chaos UI & wording so it’s not “the same app”
+      - name: Inject chaos UI (App shell + Settings + Share flow)
+        shell: bash
+        run: |
+          mkdir -p src
+          # index mount if missing (Vite/React)
+          if [ ! -f src/main.tsx ]; then
+            cat > src/main.tsx <<'EOF'
+            import React from 'react'
+            import ReactDOM from 'react-dom/client'
+            import App from './App'
+            import './index.css'
+            ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>)
+            EOF
+          fi
+
+          # Minimal CSS (prevents zoomed look on small screens)
+          if [ ! -f src/index.css ]; then
+            cat > src/index.css <<'EOF'
+            :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji","Segoe UI Emoji"; }
+            html, body, #root { height: 100%; margin: 0; }
+            * { box-sizing: border-box; }
+            button { cursor: pointer; }
+            EOF
+          fi
+
+          # Settings screen (Always On + Master Off wording)
+          cat > src/screens/SettingsAlwaysOn.tsx <<'EOF'
+          import * as React from 'react';
+          import { getAlwaysOn, setAlwaysOn } from '@/settings/alwaysOn';
+          import { getMasterOff, setMasterOff } from '@/settings/masterOff';
+          export default function SettingsAlwaysOn(){
+            const [loading,setLoading]=React.useState(true);
+            const [always,setAlways]=React.useState(false);
+            const [off,setOff]=React.useState(false);
+            const [pin,setPin]=React.useState('');
+            React.useEffect(()=>{(async()=>{ setAlways(await getAlwaysOn()); setOff(await getMasterOff()); setLoading(false); })();},[]);
+            async function confirm(label:string,next:boolean,setter:(b:boolean)=>Promise<void>,setLocal:(b:boolean)=>void){
+              const ok=window.confirm(label); if(!ok) return;
+              if (pin.trim()){
+                const input=prompt('Enter your settings PIN to proceed:'); if(input!==pin){ alert('Wrong PIN.'); return; }
+              }
+              await setter(next); setLocal(next); alert(next?'Enabled.':'Disabled.');
+            }
+            if (loading) return <div className="p-4">Loading…</div>;
+            return (
+              <div className="p-4 space-y-6">
+                <h2 className="text-xl font-semibold">Risk Controls</h2>
+                <section className="space-y-2">
+                  <h3 className="font-medium">Always On</h3>
+                  <p className="text-sm text-gray-600">When enabled, sharing + chaos are active at all times. Only Panic or Master Off will block it.</p>
+                  <button onClick={()=>confirm(always?'Disable Always On?':'Enable Always On?',!always,setAlwaysOn,setAlways)}
+                          className={`px-4 py-2 rounded-md ${always?'bg-black text-white':'bg-gray-200'}`}>{always?'ON':'OFF'}</button>
+                </section>
+                <section className="space-y-2">
+                  <h3 className="font-medium">Master Off</h3>
+                  <p className="text-sm text-gray-600">Hard OFF. Blocks all shares and chaos regardless of other settings until you disable it here.</p>
+                  <button onClick={()=>confirm(off?'Disable Master Off?':'Enable Master Off?',!off,setMasterOff,setOff)}
+                          className={`px-4 py-2 rounded-md ${off?'bg-rose-600 text-white':'bg-gray-200'}`}>{off?'ON':'OFF'}</button>
+                </section>
+                <div>
+                  <label className="block text-sm mb-1">Optional settings PIN</label>
+                  <input type="password" className="border rounded-md p-2 w-full" placeholder="Set a PIN (optional)" value={pin} onChange={e=>setPin(e.target.value)} />
+                </div>
+              </div>
+            );
+          }
+          EOF
+
+          # App.tsx — New wording, no default images, chaos flow wired
+          cat > src/App.tsx <<'EOF'
+          import React, { useState } from 'react';
+          import SettingsAlwaysOn from './screens/SettingsAlwaysOn';
+          import { TaggingModal } from './components/TaggingModal';
+          import { canShare } from './share/share-gate';
+          import { SocialShare } from './capacitor/social-share';
+          import { GallerySaver } from './capacitor/gallery-saver';
+
+          function DataUrlToBase64(dataUrl: string){ return dataUrl; }
+
+          export default function App(){
+            const [tab,setTab]=useState<'home'|'settings'>('home');
+            const [pendingImage,setPendingImage]=useState<string|null>(null);
+            const [nsfwScore,setNsfwScore]=useState(0.32); // stub bias; replace with on-device classifier if you add later
+            const [includeLinkedIn,setIncludeLinkedIn]=useState(false);
+
+            async function pickImage(e: React.ChangeEvent<HTMLInputElement>){
+              const f = e.target.files?.[0]; if(!f) return;
+              const b64 = await new Promise<string>((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result)); r.onerror=()=>rej('read'); r.readAsDataURL(f); });
+              // Save to real gallery first
+              const saved = await GallerySaver.saveBase64Image({ base64: DataUrlToBase64(b64), filename: 'ms_'+Date.now()+'.jpg' });
+              setPendingImage(saved.uri);
+            }
+
+            async function shareNow(){
+              const gate = await canShare();
+              if (!gate.ok) { alert(gate.reason==='panic'?'Sharing disabled (Panic).':gate.reason==='master_off'?'Master Off is ON.':'Disarmed. Open Settings.'); return; }
+              if (!pendingImage){ alert('Pick an image first.'); return; }
+              // Tagging gate (serious UI, no presets)
+              await new Promise<void>((resolve,reject)=>{
+                const done=()=>resolve(); const abort=()=>reject(new Error('tag-cancel'));
+                const mount=document.createElement('div'); document.body.appendChild(mount);
+                const unmount=()=>{ document.body.removeChild(mount); };
+                // render portal component
+                // quick inline render: call modal and auto unmount via callback
+                // (handled inside TaggingModal implementation)
+                (window as any).__tagModal = { done:done, abort:abort, unmount:unmount };
+              });
+              try{
+                const res = await SocialShare.directShare({ fileUri: pendingImage, nsfwScore, includeLinkedIn });
+                alert(`Shared via: ${res.target || 'chooser'}`);
+              }catch(e:any){
+                alert(typeof e?.message==='string'?e.message:'Share failed.');
+              }
+            }
+
+            return (
+              <div className="min-h-screen flex flex-col">
+                <header className="p-4 border-b flex items-center justify-between">
+                  <div className="font-semibold">Memory Streamer</div>
+                  <nav className="flex gap-2">
+                    <button className={`px-3 py-1 rounded ${tab==='home'?'bg-black text-white':'bg-gray-200'}`} onClick={()=>setTab('home')}>Home</button>
+                    <button className={`px-3 py-1 rounded ${tab==='settings'?'bg-black text-white':'bg-gray-200'}`} onClick={()=>setTab('settings')}>Settings</button>
+                  </nav>
+                </header>
+                <main className="p-4 flex-1">
+                  {tab==='home' && (
+                    <div className="space-y-4">
+                      <p className="text-sm text-gray-700">
+                        Load your own image. No presets. Wording is minimal and serious.
+                      </p>
+                      <input type="file" accept="image/*" onChange={pickImage} />
+                      {pendingImage && <div className="text-xs text-gray-600 break-all">Saved URI: {pendingImage}</div>}
+                      <div className="flex items-center gap-3">
+                        <label className="text-sm flex items-center gap-2">
+                          <input type="checkbox" checked={includeLinkedIn} onChange={e=>setIncludeLinkedIn(e.target.checked)} />
+                          include LinkedIn (risky)
+                        </label>
+                        <button onClick={shareNow} className="px-4 py-2 rounded bg-black text-white">Share</button>
+                      </div>
+                    </div>
+                  )}
+                  {tab==='settings' && <SettingsAlwaysOn/>}
+                </main>
+              </div>
+            );
+          }
+          EOF
+
+      # 5) Native Android side: add platform, plugins, MainActivity zoom, deep-link
+      - name: Add Android native plugins & patches
         shell: bash
         run: |
           npx cap add android || true
           PKG_DIR=android/app/src/main/java/com/memorystreamer/app
           mkdir -p "$PKG_DIR"
 
-          # MainActivity (zoom)
           cat > "$PKG_DIR/MainActivity.java" <<'EOF'
           package com.memorystreamer.app;
           import android.os.Bundle;
@@ -331,7 +407,6 @@ jobs:
           }
           EOF
 
-          # GallerySaver
           cat > "$PKG_DIR/GallerySaverPlugin.java" <<'EOF'
           package com.memorystreamer.app;
           import android.content.ContentResolver;
@@ -345,9 +420,9 @@ jobs:
           import com.getcapacitor.JSObject;
           import com.getcapacitor.Plugin;
           import com.getcapacitor.PluginCall;
-          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.PluginMethod;           // v7 correct
           import com.getcapacitor.annotation.CapacitorPlugin;
-          import com.getcapacitor.annotation.PluginMethod; // will be fixed by sed
+          import com.getcapacitor.annotation.PluginMethod; // will be swapped by sed
           import java.io.OutputStream;
           @CapacitorPlugin(name="GallerySaver")
           public class GallerySaverPlugin extends Plugin {
@@ -384,7 +459,6 @@ jobs:
           }
           EOF
 
-          # SocialShare
           cat > "$PKG_DIR/SocialSharePlugin.java" <<'EOF'
           package com.memorystreamer.app;
           import android.content.Intent;
@@ -394,9 +468,9 @@ jobs:
           import com.getcapacitor.JSObject;
           import com.getcapacitor.Plugin;
           import com.getcapacitor.PluginCall;
-          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.PluginMethod;           // v7 correct
           import com.getcapacitor.annotation.CapacitorPlugin;
-          import com.getcapacitor.annotation.PluginMethod; // will be fixed by sed
+          import com.getcapacitor.annotation.PluginMethod; // will be swapped by sed
           import java.util.*;
           @CapacitorPlugin(name="SocialShare")
           public class SocialSharePlugin extends Plugin {
@@ -468,15 +542,13 @@ jobs:
             private long decideLockDurationMs(String target,double nsfw,Random rnd){
               boolean personal = target.equals("instagram") || target.startsWith("twitter") || target.equals("facebook") || target.equals("discord");
               double roll = rnd.nextDouble(); long sec = 0;
-              if (nsfw >= 0.8) { if (roll < 0.7) sec = 10 + rnd.nextInt(110); }
-              else { if (roll < 0.4 && personal) sec = (6*3600) + rnd.nextInt(3*24*3600); }
+              if (nsfw >= 0.8) { if (roll < 0.7) sec = 10 + rnd.nextInt(110); } else { if (roll < 0.4 && personal) sec = (6*3600) + rnd.nextInt(3*24*3600); }
               return sec*1000L;
             }
             private List<String> toList(JSArray arr){ List<String> out=new ArrayList<>(); for (int i=0;i<arr.length();i++){ try{ out.add(arr.getString(i)); }catch(Exception ignored){} } return out; }
           }
           EOF
 
-          # Manifest deep-link
           MANIFEST=android/app/src/main/AndroidManifest.xml
           if ! grep -q 'ms50' "$MANIFEST"; then
             sed -i '/<activity android:name=".MainActivity"/a\
@@ -488,7 +560,7 @@ jobs:
                 </intent-filter>' "$MANIFEST"
           fi
 
-      # --- 3.1) FIX Capacitor v7 @PluginMethod import path (annotation package → core) ---
+      # 5.1) Fix Capacitor v7 annotation import
       - name: Fix Capacitor v7 PluginMethod imports
         shell: bash
         run: |
@@ -496,17 +568,17 @@ jobs:
             android/app/src/main/java/com/memorystreamer/app/SocialSharePlugin.java \
             android/app/src/main/java/com/memorystreamer/app/GallerySaverPlugin.java
 
-      # --- 4) Build web (after files exist) ---
+      # 6) Build web
       - name: Build web assets
         run: npm run build
 
-      # --- 5) JDK 21, Sync, Build APK ---
+      # 7) Java 21, sync, build APK
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: 21
 
-      - name: Sync Capacitor (plugins & native)
+      - name: Sync Capacitor
         run: npx cap sync android
 
       - name: Build debug APK
