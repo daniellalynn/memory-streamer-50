@@ -17,7 +17,7 @@ jobs:
       - name: Align Capacitor packages to v7
         shell: bash
         run: |
-          PKGS=$(node -e 'const p=require("./package.json"); const names=[...Object.keys(p.dependencies||{}), ...Object.keys(p.devDependencies||{})].filter(n=>n.startsWith("@capacitor/")).map(n=>`${n}@^7`); console.log(names.join(" "));')
+          PKGS=$(node -e 'const p=require("./package.json"); const all={...(p.dependencies||{}), ...(p.devDependencies||{})}; const names=Object.keys(all).filter(n=>n.startsWith("@capacitor/")).map(n=>n+"@^7"); process.stdout.write(names.join(" "));')
           echo "Upgrading: $PKGS"
           rm -f package-lock.json
           if [ -n "$PKGS" ]; then
@@ -32,6 +32,12 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 17
+
+      # ✅ Fix invalid Capacitor appId (no dashes, reverse-DNS)
+      - name: Ensure valid Capacitor appId
+        shell: bash
+        run: |
+          node -e 'const fs=require("fs"); const files=["capacitor.config.ts","capacitor.config.js","capacitor.config.json"]; const VALID=/appId\s*:\s*["\'][A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+["\']/; const VALID_JSON=/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/; let f=files.find(x=>fs.existsSync(x)); if(!f){process.exit(0)} let s=fs.readFileSync(f,"utf8"); if(f.endsWith(".json")){let j=JSON.parse(s); if(!j.appId || !VALID_JSON.test(j.appId)){j.appId="com.memorystreamer.app"} fs.writeFileSync(f,JSON.stringify(j,null,2));} else { if(!VALID.test(s)){ if(/appId\s*:\s*["\'][^"\']+["\']/.test(s)){ s=s.replace(/appId\s*:\s*["\'][^"\']+["\']/, "appId: \\"com.memorystreamer.app\\""); } else { s=s.replace(/defineConfig\(\{/, "defineConfig({\\n  appId: \\"com.memorystreamer.app\\","); } fs.writeFileSync(f,s); } }'
 
       - name: Ensure Android platform
         run: npx cap add android || true
