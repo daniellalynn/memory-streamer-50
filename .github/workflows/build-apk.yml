@@ -13,11 +13,15 @@ jobs:
         with:
           node-version: 20
 
-      # Auto-upgrade any @capacitor/* packages to v7 to match @capacitor/core@7
-      - name: Align Capacitor plugins to v7
+      # Upgrade any @capacitor/* packages to v7 to match @capacitor/core@7
+      - name: Align Capacitor packages to v7
         run: |
-          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));const bump=o=>{if(!o)return;for(const k of Object.keys(o)){if(k.startsWith('@capacitor/')){const v=o[k];if(!/^\^?7\./.test(v)) o[k]='^7.0.0';}}};bump(p.dependencies);bump(p.devDependencies);fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+          PKGS=$(node -e "const p=require('./package.json'); const names=[...Object.keys(p.dependencies||{}), ...Object.keys(p.devDependencies||{})].filter(n=>n.startsWith('@capacitor/')).map(n=>`${n}@^7`); console.log(names.join(' '));")
+          echo "Upgrading: $PKGS"
           rm -f package-lock.json
+          if [ -n "$PKGS" ]; then
+            npm i $PKGS --no-audit --no-fund
+          fi
           npm i --no-audit --no-fund
 
       - name: Build web assets
@@ -31,7 +35,7 @@ jobs:
       - name: Ensure Android platform
         run: npx cap add android || true
 
-      - name: Sync Capacitor (plugins & native)
+      - name: Sync Capacitor
         run: npx cap sync android
 
       - name: Build debug APK
@@ -40,5 +44,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: app-debug.apk
-          path: android/app/build/outputs/apk/debug/*.apk          name: app-debug.apk
           path: android/app/build/outputs/apk/debug/*.apk
