@@ -1,4 +1,4 @@
-name: Build Chaos APK (inject wiring + new UI, no commits)
+name: Build Chaos APK
 
 on:
   workflow_dispatch:
@@ -6,6 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -13,23 +14,22 @@ jobs:
         with:
           node-version: 20
 
-      # 0) Force Capacitor v7 to avoid peer conflicts; reinstall clean
-      - name: Align Capacitor to v7
+      # 0) Normalize Capacitor to v7 & install deps cleanly
+      - name: Align Capacitor to v7 and install
         shell: bash
         run: |
           node - <<'NODE'
-          const fs=require('fs');
-          const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));
-          const bump=o=>{ if(!o) return; for(const k of Object.keys(o)){ if(k.startsWith('@capacitor/')) o[k]='^7.0.0'; } };
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+          const bump=(o)=>{ if(!o) return; for(const k of Object.keys(o)){ if(k.startsWith('@capacitor/')) o[k]='^7.0.0'; } };
           bump(pkg.dependencies); bump(pkg.devDependencies);
-          // prefer react + vite if available; don't force-add
           fs.writeFileSync('package.json', JSON.stringify(pkg,null,2));
           NODE
           rm -f package-lock.json
           npm i --no-audit --no-fund
 
-      # 1) Set Capacitor config and viewport tag (safe defaults)
-      - name: Write Capacitor config + viewport
+      # 1) Capacitor config + viewport
+      - name: Write Capacitor config
         shell: bash
         run: |
           cat > capacitor.config.ts <<'EOF'
@@ -42,6 +42,10 @@ jobs:
           };
           export default config;
           EOF
+
+      - name: Ensure viewport meta
+        shell: bash
+        run: |
           FILE=""
           [ -f public/index.html ] && FILE=public/index.html
           [ -z "$FILE" ] && [ -f src/index.html ] && FILE=src/index.html
@@ -51,28 +55,34 @@ jobs:
             fi
           fi
 
-      # 2) Remove default/preset images & wording (wipe likely folders; safe if absent)
-      - name: Remove default images and preset assets
+      # 2) Remove default/preset images & obvious demo assets
+      - name: Remove default preset images
         shell: bash
         run: |
           rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
-          # Nuke any seeded demo JPG/PNG in public root
           find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
 
-      # 3) Inject chaos modules, settings, tagging, verification, undo, bridges (same as before)
-      - name: Write core chaos modules
-        shell: bash
-        run: |
-          mkdir -p src/chaos src/nl src/upload src/components src/capacitor src/share src/settings src/verify src/screens
+      # 3) Core modules (split safe steps; each has its own EOF)
+      - name: Make src directories
+        run: mkdir -p src/chaos src/nl src/upload src/components src/capacitor src/share src/settings src/verify src/screens
 
+      - name: Write useChaosTiming.ts
+        run: |
           cat > src/chaos/useChaosTiming.ts <<'EOF'
           export function useChaosTiming({ min = 250, max = 4500 }: { min?: number; max?: number }) {
             const randomDelay = () => Math.floor(min + Math.random() * (max - min));
             const shouldPreempt = () => Math.random() < 0.15;
-            return { schedule(fn: () => void) { const id=setTimeout(()=>{ if(!shouldPreempt()) fn(); }, randomDelay()); return ()=>clearTimeout(id); } };
+            return {
+              schedule(fn: () => void) {
+                const id = setTimeout(() => { if (!shouldPreempt()) fn(); }, randomDelay());
+                return () => clearTimeout(id);
+              }
+            };
           }
           EOF
 
+      - name: Write util-hash.ts
+        run: |
           cat > src/upload/util-hash.ts <<'EOF'
           export async function sha256(s: string): Promise<string> {
             const enc = new TextEncoder().encode(s);
@@ -81,6 +91,8 @@ jobs:
           }
           EOF
 
+      - name: Write showTaggingGate.ts
+        run: |
           cat > src/upload/showTaggingGate.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           import { sha256 } from './util-hash';
@@ -97,6 +109,8 @@ jobs:
           }
           EOF
 
+      - name: Write markov.ts
+        run: |
           cat > src/nl/markov.ts <<'EOF'
           const ORDER = 2; let model: Record<string, string[]> = Object.create(null);
           export function rememberUserText(text:string){const t=tokenize(text);for(let i=0;i+ORDER<t.length;i++){const k=t.slice(i,i+ORDER).join('\u0001');(model[k] ||= []).push(t[i+ORDER]);}}
@@ -104,6 +118,8 @@ jobs:
           function tokenize(s:string){return s.trim().replace(/\s+/g,' ').split(' ');}
           EOF
 
+      - name: Write verify.ts
+        run: |
           cat > src/verify/verify.ts <<'EOF'
           export type Tag = 'ex'|'friend'|'egirl'|'classmate'|'other';
           export type VerifyInput = { tag: Tag; nsfwScore?: number; };
@@ -130,6 +146,8 @@ jobs:
           function minimalLogic(){const a=prompt('Are you knowingly misclassifying this image? Type YES or NO.');return Promise.resolve(!!a && /^(YES|NO)$/.test(a.trim().toUpperCase()));}
           EOF
 
+      - name: Write SocialShare bridge
+        run: |
           cat > src/capacitor/social-share.ts <<'EOF'
           import { registerPlugin } from '@capacitor/core';
           export type DirectShareOptions = { fileUri:string; nsfwScore?:number; includeLinkedIn?:boolean; targets?:string[] };
@@ -142,12 +160,16 @@ jobs:
           export const SocialShare = registerPlugin<SocialSharePlugin>('SocialShare');
           EOF
 
+      - name: Write GallerySaver bridge
+        run: |
           cat > src/capacitor/gallery-saver.ts <<'EOF'
           import { registerPlugin } from '@capacitor/core';
           export interface GallerySaverPlugin { saveBase64Image(options:{ base64:string; filename?:string }): Promise<{ uri:string }>; }
           export const GallerySaver = registerPlugin<GallerySaverPlugin>('GallerySaver');
           EOF
 
+      - name: Write settings (Always On)
+        run: |
           cat > src/settings/alwaysOn.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           const KEY='always_on', SIG='always_on_sig', SECRET='local-fixed-pepper-v1';
@@ -156,6 +178,8 @@ jobs:
           export async function setAlwaysOn(on:boolean){ const v=on?'1':'0'; await Preferences.set({key:KEY,value:v}); await Preferences.set({key:SIG,value:sign(v)}); }
           EOF
 
+      - name: Write settings (Master Off)
+        run: |
           cat > src/settings/masterOff.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           const KEY='master_off', SIG='master_off_sig', SECRET='local-fixed-pepper-v1';
@@ -164,6 +188,8 @@ jobs:
           export async function setMasterOff(on:boolean){ const v=on?'1':'0'; await Preferences.set({key:KEY,value:v}); await Preferences.set({key:SIG,value:sign(v)}); }
           EOF
 
+      - name: Write share state helpers
+        run: |
           cat > src/share/state.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           export async function setPanic(on:boolean){ await Preferences.set({key:'panic_on',value:on?'1':'0'}); }
@@ -172,6 +198,8 @@ jobs:
           export async function disarm(){ await Preferences.set({key:'armed_until',value:'0'}); }
           EOF
 
+      - name: Write share gate
+        run: |
           cat > src/share/share-gate.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           import { getAlwaysOn } from '@/settings/alwaysOn';
@@ -193,11 +221,21 @@ jobs:
           }
           EOF
 
+      - name: Write undo-config.ts
+        run: |
           cat > src/chaos/undo-config.ts <<'EOF'
-          export const UNDO = { ENABLED:true, BASE_CHANCE:0.18, WINDOW_MS:2000, COOLDOWN_HOURS:72, PENALTY_LOCK_HOURS:48,
-            chanceForScore(n:number){ const base=this.BASE_CHANCE; const pen=Math.max(0,1-(n*1.2)); return base*pen; } };
+          export const UNDO = {
+            ENABLED: true,
+            BASE_CHANCE: 0.18,
+            WINDOW_MS: 2000,
+            COOLDOWN_HOURS: 72,
+            PENALTY_LOCK_HOURS: 48,
+            chanceForScore(n:number){ const base=this.BASE_CHANCE; const pen=Math.max(0,1-(n*1.2)); return base*pen; }
+          };
           EOF
 
+      - name: Write hard-undo.ts
+        run: |
           cat > src/chaos/hard-undo.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           import { UNDO } from './undo-config';
@@ -221,19 +259,21 @@ jobs:
           }
           EOF
 
-          cat > src/share/after-share.ts <<'EOF'
-          import { maybeOfferHardUndo } from '@/chaos/hard-undo';
-          export async function afterShareHook(target:string|undefined, nsfwScore:number, enablePanic:()=>Promise<void>, openAppFast:(t:string)=>Promise<void>){
-            await maybeOfferHardUndo(nsfwScore, ()=>{}, async()=>{ await enablePanic(); if(target) await openAppFast(target); });
-          }
+      # 4) New minimal UI (wording updated; no default images)
+      - name: Ensure base UI files exist
+        run: mkdir -p src && touch src/index.css
+
+      - name: Write index.css
+        run: |
+          cat > src/index.css <<'EOF'
+          :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji","Segoe UI Emoji"; }
+          html, body, #root { height: 100%; margin: 0; }
+          * { box-sizing: border-box; }
+          button { cursor: pointer; }
           EOF
 
-      # 4) **Replace front-end** with chaos UI & wording so it’s not “the same app”
-      - name: Inject chaos UI (App shell + Settings + Share flow)
-        shell: bash
+      - name: Write main.tsx (if missing)
         run: |
-          mkdir -p src
-          # index mount if missing (Vite/React)
           if [ ! -f src/main.tsx ]; then
             cat > src/main.tsx <<'EOF'
             import React from 'react'
@@ -244,17 +284,8 @@ jobs:
             EOF
           fi
 
-          # Minimal CSS (prevents zoomed look on small screens)
-          if [ ! -f src/index.css ]; then
-            cat > src/index.css <<'EOF'
-            :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji","Segoe UI Emoji"; }
-            html, body, #root { height: 100%; margin: 0; }
-            * { box-sizing: border-box; }
-            button { cursor: pointer; }
-            EOF
-          fi
-
-          # Settings screen (Always On + Master Off wording)
+      - name: Write SettingsAlwaysOn.tsx
+        run: |
           cat > src/screens/SettingsAlwaysOn.tsx <<'EOF'
           import * as React from 'react';
           import { getAlwaysOn, setAlwaysOn } from '@/settings/alwaysOn';
@@ -297,48 +328,38 @@ jobs:
           }
           EOF
 
-          # App.tsx — New wording, no default images, chaos flow wired
+      - name: Write App.tsx (new wording, no presets)
+        run: |
           cat > src/App.tsx <<'EOF'
           import React, { useState } from 'react';
           import SettingsAlwaysOn from './screens/SettingsAlwaysOn';
-          import { TaggingModal } from './components/TaggingModal';
           import { canShare } from './share/share-gate';
           import { SocialShare } from './capacitor/social-share';
           import { GallerySaver } from './capacitor/gallery-saver';
 
-          function DataUrlToBase64(dataUrl: string){ return dataUrl; }
-
           export default function App(){
             const [tab,setTab]=useState<'home'|'settings'>('home');
             const [pendingImage,setPendingImage]=useState<string|null>(null);
-            const [nsfwScore,setNsfwScore]=useState(0.32); // stub bias; replace with on-device classifier if you add later
+            const [nsfwScore] = useState(0.32); // placeholder bias
             const [includeLinkedIn,setIncludeLinkedIn]=useState(false);
 
             async function pickImage(e: React.ChangeEvent<HTMLInputElement>){
               const f = e.target.files?.[0]; if(!f) return;
               const b64 = await new Promise<string>((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result)); r.onerror=()=>rej('read'); r.readAsDataURL(f); });
-              // Save to real gallery first
-              const saved = await GallerySaver.saveBase64Image({ base64: DataUrlToBase64(b64), filename: 'ms_'+Date.now()+'.jpg' });
+              const saved = await GallerySaver.saveBase64Image({ base64: b64, filename: 'ms_'+Date.now()+'.jpg' });
               setPendingImage(saved.uri);
             }
 
             async function shareNow(){
               const gate = await canShare();
-              if (!gate.ok) { alert(gate.reason==='panic'?'Sharing disabled (Panic).':gate.reason==='master_off'?'Master Off is ON.':'Disarmed. Open Settings.'); return; }
+              if (!gate.ok) {
+                alert(gate.reason==='panic'?'Sharing disabled (Panic).':gate.reason==='master_off'?'Master Off is ON.':'Disarmed. Open Settings.');
+                return;
+              }
               if (!pendingImage){ alert('Pick an image first.'); return; }
-              // Tagging gate (serious UI, no presets)
-              await new Promise<void>((resolve,reject)=>{
-                const done=()=>resolve(); const abort=()=>reject(new Error('tag-cancel'));
-                const mount=document.createElement('div'); document.body.appendChild(mount);
-                const unmount=()=>{ document.body.removeChild(mount); };
-                // render portal component
-                // quick inline render: call modal and auto unmount via callback
-                // (handled inside TaggingModal implementation)
-                (window as any).__tagModal = { done:done, abort:abort, unmount:unmount };
-              });
               try{
                 const res = await SocialShare.directShare({ fileUri: pendingImage, nsfwScore, includeLinkedIn });
-                alert(`Shared via: ${res.target || 'chooser'}`);
+                alert(\`Shared via: \${res.target || 'chooser'}\`);
               }catch(e:any){
                 alert(typeof e?.message==='string'?e.message:'Share failed.');
               }
@@ -349,16 +370,14 @@ jobs:
                 <header className="p-4 border-b flex items-center justify-between">
                   <div className="font-semibold">Memory Streamer</div>
                   <nav className="flex gap-2">
-                    <button className={`px-3 py-1 rounded ${tab==='home'?'bg-black text-white':'bg-gray-200'}`} onClick={()=>setTab('home')}>Home</button>
-                    <button className={`px-3 py-1 rounded ${tab==='settings'?'bg-black text-white':'bg-gray-200'}`} onClick={()=>setTab('settings')}>Settings</button>
+                    <button className={\`px-3 py-1 rounded \${tab==='home'?'bg-black text-white':'bg-gray-200'}\`} onClick={()=>setTab('home')}>Home</button>
+                    <button className={\`px-3 py-1 rounded \${tab==='settings'?'bg-black text-white':'bg-gray-200'}\`} onClick={()=>setTab('settings')}>Settings</button>
                   </nav>
                 </header>
                 <main className="p-4 flex-1">
                   {tab==='home' && (
                     <div className="space-y-4">
-                      <p className="text-sm text-gray-700">
-                        Load your own image. No presets. Wording is minimal and serious.
-                      </p>
+                      <p className="text-sm text-gray-700">Load your own image. No presets. Language is minimal and serious.</p>
                       <input type="file" accept="image/*" onChange={pickImage} />
                       {pendingImage && <div className="text-xs text-gray-600 break-all">Saved URI: {pendingImage}</div>}
                       <div className="flex items-center gap-3">
@@ -377,15 +396,14 @@ jobs:
           }
           EOF
 
-      # 5) Native Android side: add platform, plugins, MainActivity zoom, deep-link
-      - name: Add Android native plugins & patches
-        shell: bash
-        run: |
-          npx cap add android || true
-          PKG_DIR=android/app/src/main/java/com/memorystreamer/app
-          mkdir -p "$PKG_DIR"
+      # 5) Android platform + native plugins; zoom fix; deep link; import fix for Capacitor v7
+      - name: Add Android project
+        run: npx cap add android || true
 
-          cat > "$PKG_DIR/MainActivity.java" <<'EOF'
+      - name: Write MainActivity.java
+        run: |
+          mkdir -p android/app/src/main/java/com/memorystreamer/app
+          cat > android/app/src/main/java/com/memorystreamer/app/MainActivity.java <<'EOF'
           package com.memorystreamer.app;
           import android.os.Bundle;
           import android.webkit.WebSettings;
@@ -407,7 +425,9 @@ jobs:
           }
           EOF
 
-          cat > "$PKG_DIR/GallerySaverPlugin.java" <<'EOF'
+      - name: Write GallerySaverPlugin.java
+        run: |
+          cat > android/app/src/main/java/com/memorystreamer/app/GallerySaverPlugin.java <<'EOF'
           package com.memorystreamer.app;
           import android.content.ContentResolver;
           import android.content.ContentValues;
@@ -422,7 +442,6 @@ jobs:
           import com.getcapacitor.PluginCall;
           import com.getcapacitor.PluginMethod;           // v7 correct
           import com.getcapacitor.annotation.CapacitorPlugin;
-          import com.getcapacitor.annotation.PluginMethod; // will be swapped by sed
           import java.io.OutputStream;
           @CapacitorPlugin(name="GallerySaver")
           public class GallerySaverPlugin extends Plugin {
@@ -459,7 +478,9 @@ jobs:
           }
           EOF
 
-          cat > "$PKG_DIR/SocialSharePlugin.java" <<'EOF'
+      - name: Write SocialSharePlugin.java
+        run: |
+          cat > android/app/src/main/java/com/memorystreamer/app/SocialSharePlugin.java <<'EOF'
           package com.memorystreamer.app;
           import android.content.Intent;
           import android.content.pm.PackageManager;
@@ -470,7 +491,6 @@ jobs:
           import com.getcapacitor.PluginCall;
           import com.getcapacitor.PluginMethod;           // v7 correct
           import com.getcapacitor.annotation.CapacitorPlugin;
-          import com.getcapacitor.annotation.PluginMethod; // will be swapped by sed
           import java.util.*;
           @CapacitorPlugin(name="SocialShare")
           public class SocialSharePlugin extends Plugin {
@@ -549,6 +569,9 @@ jobs:
           }
           EOF
 
+      - name: Add deep link to manifest (if missing)
+        shell: bash
+        run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
           if ! grep -q 'ms50' "$MANIFEST"; then
             sed -i '/<activity android:name=".MainActivity"/a\
@@ -560,14 +583,6 @@ jobs:
                 </intent-filter>' "$MANIFEST"
           fi
 
-      # 5.1) Fix Capacitor v7 annotation import
-      - name: Fix Capacitor v7 PluginMethod imports
-        shell: bash
-        run: |
-          sed -i 's#import com\.getcapacitor\.annotation\.PluginMethod;#import com.getcapacitor.PluginMethod;#' \
-            android/app/src/main/java/com/memorystreamer/app/SocialSharePlugin.java \
-            android/app/src/main/java/com/memorystreamer/app/GallerySaverPlugin.java
-
       # 6) Build web
       - name: Build web assets
         run: npm run build
@@ -578,7 +593,7 @@ jobs:
           distribution: 'temurin'
           java-version: 21
 
-      - name: Sync Capacitor
+      - name: Sync Capacitor (plugins & native)
         run: npx cap sync android
 
       - name: Build debug APK
