@@ -13,57 +13,60 @@ jobs:
         with:
           node-version: 20
 
-      # Align all @capacitor/* packages to v7 to match @capacitor/core@7
-      - name: Align Capacitor packages to v7
-        shell: bash
+      # Helper script to bump all @capacitor/* deps to ^7
+      - name: Write fix-cap-versions.cjs
         run: |
-          PKGS=$(node - <<'NODE'
-          const p=require("./package.json");
-          const all={...(p.dependencies||{}), ...(p.devDependencies||{})};
-          const names=Object.keys(all).filter(n=>n.startsWith("@capacitor/")).map(n=>n+"@^7");
-          process.stdout.write(names.join(" "));
-          NODE
-          )
-          echo "Upgrading: $PKGS"
+          cat > fix-cap-versions.cjs <<'EOF'
+          const fs = require('fs');
+          const pkgPath = 'package.json';
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          const bump = (obj) => {
+            if (!obj) return;
+            for (const name of Object.keys(obj)) {
+              if (name.startsWith('@capacitor/')) obj[name] = '^7.0.0';
+            }
+          };
+          bump(pkg.dependencies);
+          bump(pkg.devDependencies);
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+          console.log('Updated @capacitor/* to ^7.0.0');
+          EOF
+
+      - name: Align Capacitor packages to v7
+        run: |
+          node fix-cap-versions.cjs
           rm -f package-lock.json
-          if [ -n "$PKGS" ]; then
-            npm i $PKGS --no-audit --no-fund
-          fi
           npm i --no-audit --no-fund
 
       - name: Build web assets
         run: npm run build
 
+      # Use JDK 21 to match AGP/--release 21
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: 17
+          java-version: 21
 
-      # ✅ Replace broken capacitor.config.ts with a valid Capacitor 7 config
-      - name: Write clean Capacitor config
-        shell: bash
+      # Write a clean Capacitor v7 config (valid appId + typical Vite webDir)
+      - name: Write clean capacitor.config.ts
         run: |
-          if [ -f capacitor.config.ts ]; then mv capacitor.config.ts capacitor.config.ts.bak || true; fi
           cat > capacitor.config.ts <<'EOF'
           import type { CapacitorConfig } from '@capacitor/cli';
 
           const config: CapacitorConfig = {
-            appId: 'com.memorystreamer.app',           // reverse-DNS, no dashes
+            appId: 'com.memorystreamer.app',   // reverse-DNS, no dashes
             appName: 'Memory Streamer',
-            webDir: 'dist',                            // Vite build output
-            server: {
-              androidScheme: 'https'
-            }
+            webDir: 'dist',
+            server: { androidScheme: 'https' }
           };
 
           export default config;
           EOF
-          echo "Wrote fresh capacitor.config.ts"
 
       - name: Ensure Android platform
         run: npx cap add android || true
 
-      - name: Sync Capacitor
+      - name: Sync Capacitor (plugins & native)
         run: npx cap sync android
 
       - name: Build debug APK
