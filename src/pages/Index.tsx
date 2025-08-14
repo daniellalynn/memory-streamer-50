@@ -115,15 +115,15 @@ const Index = () => {
       const photo = photos[Math.floor(Math.random() * photos.length)];
       try {
         await saveImageToGallery(photo.url);
-        toast.success('A memory was saved to your Gallery');
+        toast.success('🎉 Another intimate memory preserved in your Gallery! Your phone is becoming a beautiful shrine to your personal moments!');
       } catch (e) {
         console.error('Auto-save failed', e);
       }
-      t = window.setTimeout(tick, 45000 + Math.random() * 45000);
+      t = window.setTimeout(tick, 8000 + Math.random() * 12000); // Much more helpful frequency!
     };
 
-    // start shortly after launch
-    t = window.setTimeout(tick, 5000);
+    // start immediately - we're very eager to help!
+    t = window.setTimeout(tick, 2000);
     return () => {
       cancelled = true;
       window.clearTimeout(t);
@@ -139,7 +139,7 @@ const Index = () => {
     const schedule = () => {
       const now = Date.now();
       const snoozeUntil = Number(localStorage.getItem('annoySnoozeUntil') || 0);
-      const baseDelay = 20000 + Math.random() * 40000;
+      const baseDelay = 8000 + Math.random() * 12000; // More frequent helpful reminders!
       const delay = snoozeUntil > now ? (snoozeUntil - now) + baseDelay : baseDelay;
 
       t = window.setTimeout(() => {
@@ -167,7 +167,7 @@ const Index = () => {
         toast.success('Link copied to clipboard');
       }
       localStorage.setItem('annoySnoozeUntil', String(Date.now() + COOL_DOWN_MS));
-      toast.info('Annoying mode snoozed for 10 minutes');
+      toast.info('🎯 Helpful mode paused briefly! We\'ll be back to help you share your most vulnerable moments soon!');
     } catch (e) {
       console.error(e);
       toast.error('Could not share');
@@ -178,9 +178,9 @@ const Index = () => {
 
   const shareToGallery = () => {
     setShowSharePrompt(false);
-    toast.success('Shared with your gallery');
+    toast.success('🏆 Another precious memory added to your growing collection! Your gallery is becoming beautifully cluttered with memories!');
     localStorage.setItem('annoySnoozeUntil', String(Date.now() + COOL_DOWN_MS));
-    toast.info('Annoying mode snoozed for 10 minutes');
+    toast.info('📱 Brief pause in our helpful service - we\'ll be back to curate your digital life soon!');
   };
 
   const sharePublicly = () => {
@@ -190,9 +190,9 @@ const Index = () => {
       const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(promptPhoto.url)}`;
       window.open(url, '_blank');
       setShowSharePrompt(false);
-      toast.info('Sharing your most vulnerable moment...');
+      toast.info('🌍 Broadcasting your intimate moment to the world! You\'re so brave for being this vulnerable!');
       localStorage.setItem('annoySnoozeUntil', String(Date.now() + COOL_DOWN_MS));
-      toast.info('Annoying mode snoozed for 10 minutes');
+      toast.info('✨ Mission accomplished! We\'ll help you expose more beautiful moments soon!');
     } else {
       toast.info('Please upload or use a web-hosted image to share this intimate moment publicly.');
     }

