@@ -13,26 +13,32 @@ jobs:
         with:
           node-version: 20
 
-      # Quick fix: update local-notifications plugin to v7 so it matches Capacitor 7
-      - name: Bump local-notifications to v7
-        run: npm i @capacitor/local-notifications@^7 --no-audit --no-fund
+      # Auto-upgrade any @capacitor/* packages to v7 to match @capacitor/core@7
+      - name: Align Capacitor plugins to v7
+        run: |
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));const bump=o=>{if(!o)return;for(const k of Object.keys(o)){if(k.startsWith('@capacitor/')){const v=o[k];if(!/^\^?7\./.test(v)) o[k]='^7.0.0';}}};bump(p.dependencies);bump(p.devDependencies);fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+          rm -f package-lock.json
+          npm i --no-audit --no-fund
 
-      # Install all dependencies
-      - name: Install deps
-        run: npm i
-
-      - run: npm run build
+      - name: Build web assets
+        run: npm run build
 
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: 17
 
-      - run: npx cap add android || true
-      - run: npx cap copy android
-      - run: cd android && ./gradlew assembleDebug
+      - name: Ensure Android platform
+        run: npx cap add android || true
+
+      - name: Sync Capacitor (plugins & native)
+        run: npx cap sync android
+
+      - name: Build debug APK
+        run: cd android && ./gradlew assembleDebug
 
       - uses: actions/upload-artifact@v4
         with:
           name: app-debug.apk
+          path: android/app/build/outputs/apk/debug/*.apk          name: app-debug.apk
           path: android/app/build/outputs/apk/debug/*.apk
