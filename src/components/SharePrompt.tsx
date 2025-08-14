@@ -133,14 +133,16 @@ export const SharePrompt = ({ open, onOpenChange, photo, onSharePerson, onShareG
           </div>
 
           {/* Priority Contact Display */}
-          {topContact && (
+          {topContact && (topContact.contact || topContact.platform) && (
             <div className="bg-muted/50 p-3 rounded-lg">
               <div className="flex items-center gap-2 mb-2">
                 {(() => {
                   const Icon = priorityIcons[topContact.priority];
                   return <Icon className="w-4 h-4" />;
                 })()}
-                <span className="font-medium">Priority #{topContact.priority}: {topContact.contact.name}</span>
+                <span className="font-medium">
+                  Priority #{topContact.priority}: {topContact.contact?.name || topContact.platform?.name}
+                </span>
               </div>
               <p className="text-sm text-muted-foreground">{topContact.reason}</p>
             </div>
@@ -151,7 +153,7 @@ export const SharePrompt = ({ open, onOpenChange, photo, onSharePerson, onShareG
               "I never thought I'd share this..."
             </p>
             <p className="text-sm text-muted-foreground">
-              This deeply personal moment will be sent to {topContact?.contact.name || 'someone special'}. 
+              This deeply personal moment will be sent to {topContact?.contact?.name || topContact?.platform?.name || 'someone special'}. 
               They'll see the real, vulnerable you. Are you ready to be this open?
             </p>
           </div>
@@ -166,7 +168,7 @@ export const SharePrompt = ({ open, onOpenChange, photo, onSharePerson, onShareG
                   return (
                     <div key={cp.priority} className="flex items-center gap-2 text-xs">
                       <Icon className="w-3 h-3" />
-                      <span>#{cp.priority}: {cp.contact.name}</span>
+                      <span>#{cp.priority}: {cp.contact?.name || cp.platform?.name}</span>
                       <span className="text-muted-foreground">({cp.reason})</span>
                     </div>
                   );

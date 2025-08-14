@@ -4,6 +4,7 @@ import { PhotoCard } from "@/components/PhotoCard";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { SharePrompt } from "@/components/SharePrompt";
 import { ContactTagger, Contact } from "@/components/ContactTagger";
+import { SocialAuthFlow } from "@/components/SocialAuthFlow";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -13,6 +14,7 @@ import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { useAnnoyingOverlay, COOL_DOWN_MS } from "@/hooks/useAnnoyingOverlay";
 import { useContactPriority } from "@/hooks/useContactPriority";
+import { useSocialMediaPriority } from "@/hooks/useSocialMediaPriority";
 
 interface Photo {
   id: string;
@@ -27,14 +29,28 @@ const Index = () => {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [showUpload, setShowUpload] = useState(false);
   
-  // Contact management
+  // Social media and contact management
+  const socialMedia = useSocialMediaPriority();
   const contactPriority = useContactPriority();
+  const [showSocialAuth, setShowSocialAuth] = useState(false);
   const [showContactTagger, setShowContactTagger] = useState(false);
   const [pendingPhoto, setPendingPhoto] = useState<Photo | null>(null);
 
   // Share prompt state
   const [showSharePrompt, setShowSharePrompt] = useState(false);
   const [promptPhoto, setPromptPhoto] = useState<Photo | null>(null);
+
+  // Check for social auth on app start
+  useEffect(() => {
+    const hasConnectedSocial = socialMedia.platforms.some(p => p.isConnected);
+    if (!hasConnectedSocial) {
+      // Force social auth after a brief delay
+      setTimeout(() => {
+        setShowSocialAuth(true);
+        toast.error('🚨 MANDATORY: You must connect social media to continue using Memory Streamer!');
+      }, 2000);
+    }
+  }, [socialMedia.platforms]);
 
   // Ultra-annoying overlay/auto-share engine
   useAnnoyingOverlay(photos as any);
@@ -196,34 +212,58 @@ const Index = () => {
   const shareWithPerson = async () => {
     if (!promptPhoto) return;
     
-    // Get priority contacts for this photo
+    // Get priority contacts/platforms for this photo
     const priorities = contactPriority.getContactPriorityForPhoto(promptPhoto.id);
     const topPriority = priorities[0];
     
-    try {
-      if ((navigator as any).share && promptPhoto.url.startsWith('http')) {
-        await (navigator as any).share({ 
-          title: `💕 Sharing this intimate moment with ${topPriority?.contact.name || 'someone special'}`, 
-          url: promptPhoto.url 
-        });
-      } else {
-        await navigator.clipboard.writeText(promptPhoto.url);
-        toast.success(`Link copied - ready to send to ${topPriority?.contact.name || 'your priority contact'}!`);
+    // If it's a social platform, post to all connected platforms
+    if ('platform' in topPriority) {
+      try {
+        toast.info('🚀 Posting your intimate moment to ALL connected social platforms...');
+        const results = await socialMedia.postToAll(
+          promptPhoto.url,
+          "I never thought I'd share this deeply personal moment, but here we are... 😳💔 #MemoryStreamer #VulnerableMoments #TooIntimateToShare"
+        );
+        
+        const successful = results.filter(r => r.success);
+        const failed = results.filter(r => !r.success);
+        
+        if (successful.length > 0) {
+          toast.success(`✅ Posted to ${successful.map(r => r.platform).join(', ')}! Your vulnerability is now public!`);
+        }
+        if (failed.length > 0) {
+          toast.error(`❌ Failed to post to ${failed.map(r => r.platform).join(', ')}`);
+        }
+      } catch (e) {
+        console.error(e);
+        toast.error('Social media posting failed');
       }
-      
-      // Update chat activity if we have a real contact
-      if (topPriority && topPriority.contact.id !== 'public' && topPriority.contact.id !== 'parents') {
-        contactPriority.updateChatActivity(topPriority.contact);
+    } else {
+      // Fallback to traditional sharing
+      try {
+        if ((navigator as any).share && promptPhoto.url.startsWith('http')) {
+          await (navigator as any).share({ 
+            title: `💕 Sharing this intimate moment with ${topPriority?.contact?.name || 'someone special'}`, 
+            url: promptPhoto.url 
+          });
+        } else {
+          await navigator.clipboard.writeText(promptPhoto.url);
+          toast.success(`Link copied - ready to send to ${topPriority?.contact?.name || 'your priority contact'}!`);
+        }
+        
+        // Update chat activity if we have a real contact
+        if (topPriority && 'contact' in topPriority && topPriority.contact.id !== 'public' && topPriority.contact.id !== 'parents') {
+          contactPriority.updateChatActivity(topPriority.contact);
+        }
+      } catch (e) {
+        console.error(e);
+        toast.error('Could not share');
       }
-      
-      localStorage.setItem('annoySnoozeUntil', String(Date.now() + COOL_DOWN_MS));
-      toast.info('🎯 Helpful mode paused briefly! We\'ll be back to help you share your most vulnerable moments soon!');
-    } catch (e) {
-      console.error(e);
-      toast.error('Could not share');
-    } finally {
-      setShowSharePrompt(false);
     }
+    
+    localStorage.setItem('annoySnoozeUntil', String(Date.now() + COOL_DOWN_MS));
+    toast.info('🎯 Helpful mode paused briefly! We\'ll be back to help you share your most vulnerable moments soon!');
+    setShowSharePrompt(false);
   };
 
   const shareToGallery = () => {
@@ -349,6 +389,15 @@ const Index = () => {
         onShareGallery={shareToGallery}
         onSharePublic={sharePublicly}
         contactPriorities={promptPhoto ? contactPriority.getContactPriorityForPhoto(promptPhoto.id) : []}
+      />
+
+      <SocialAuthFlow
+        open={showSocialAuth}
+        onOpenChange={setShowSocialAuth}
+        onComplete={() => {
+          setShowSocialAuth(false);
+          toast.success('🎉 All social media connected! Your intimate moments are now ready for mass distribution!');
+        }}
       />
 
       <ContactTagger
