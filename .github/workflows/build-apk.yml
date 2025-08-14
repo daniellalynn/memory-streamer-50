@@ -15,8 +15,9 @@ jobs:
 
       # Upgrade any @capacitor/* packages to v7 to match @capacitor/core@7
       - name: Align Capacitor packages to v7
+        shell: bash
         run: |
-          PKGS=$(node -e "const p=require('./package.json'); const names=[...Object.keys(p.dependencies||{}), ...Object.keys(p.devDependencies||{})].filter(n=>n.startsWith('@capacitor/')).map(n=>`${n}@^7`); console.log(names.join(' '));")
+          PKGS=$(node -e 'const p=require("./package.json"); const names=[...Object.keys(p.dependencies||{}), ...Object.keys(p.devDependencies||{})].filter(n=>n.startsWith("@capacitor/")).map(n=>`${n}@^7`); console.log(names.join(" "));')
           echo "Upgrading: $PKGS"
           rm -f package-lock.json
           if [ -n "$PKGS" ]; then
