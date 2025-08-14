@@ -13,7 +13,14 @@ jobs:
         with:
           node-version: 20
 
-      - run: npm ci
+      # Quick fix: update local-notifications plugin to v7 so it matches Capacitor 7
+      - name: Bump local-notifications to v7
+        run: npm i @capacitor/local-notifications@^7 --no-audit --no-fund
+
+      # Install all dependencies
+      - name: Install deps
+        run: npm i
+
       - run: npm run build
 
       - uses: actions/setup-java@v4
