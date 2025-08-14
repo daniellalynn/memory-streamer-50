@@ -1,7 +1,6 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
-const config: CapacitorConfig = {
-  appId: 'app.lovable.0f577a6d12884dbcb5626b52242bc82e',
+const config: CapacitorConfig = {com.memorystreamer.app',
   appName: 'memory-streamer-50',
   webDir: 'dist',
   server: {
