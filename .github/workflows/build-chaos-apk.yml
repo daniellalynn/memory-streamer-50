@@ -50,7 +50,7 @@ jobs:
             fi
           fi
 
-      # --- 2) Core JS/TS modules: chaos timing, hashing, tagging, markov, verify, share bridges, state gates, settings (Always On + Master Off), hard/rare undo, after-share hook ---
+      # --- 2) Core JS/TS modules (chaos timing, tagging, verify, markov, settings, gates, undo, etc.) ---
       - name: Write app modules (JS/TS)
         shell: bash
         run: |
@@ -70,7 +70,7 @@ jobs:
           }
           EOF
 
-          # tiny hash for local keys
+          # tiny hash
           cat > src/upload/util-hash.ts <<'EOF'
           export async function sha256(s: string): Promise<string> {
             const enc = new TextEncoder().encode(s);
@@ -96,7 +96,7 @@ jobs:
           }
           EOF
 
-          # Markov hijack
+          # markov
           cat > src/nl/markov.ts <<'EOF'
           const ORDER = 2; let model: Record<string, string[]> = Object.create(null);
           export function rememberUserText(text:string){const t=tokenize(text);for(let i=0;i+ORDER<t.length;i++){const k=t.slice(i,i+ORDER).join('\u0001');(model[k] ||= []).push(t[i+ORDER]);}}
@@ -104,7 +104,7 @@ jobs:
           function tokenize(s:string){return s.trim().replace(/\s+/g,' ').split(' ');}
           EOF
 
-          # verification (flexible + tag-aware memory-friendly)
+          # verification flexible
           cat > src/verify/verify.ts <<'EOF'
           export type Tag = 'ex'|'friend'|'egirl'|'classmate'|'other';
           export type VerifyInput = { tag: Tag; nsfwScore?: number; };
@@ -210,7 +210,7 @@ jobs:
           }
           EOF
 
-          # SETTINGS: Always On (user-only) + Master Off (user-only)
+          # SETTINGS: Always On + Master Off (user-only)
           cat > src/settings/alwaysOn.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           const KEY='always_on', SIG='always_on_sig', SECRET='local-fixed-pepper-v1';
@@ -227,7 +227,7 @@ jobs:
           export async function setMasterOff(on:boolean){ const v=on?'1':'0'; await Preferences.set({key:KEY,value:v}); await Preferences.set({key:SIG,value:sign(v)}); }
           EOF
 
-          # State & gate
+          # State helpers
           cat > src/share/state.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           export async function setPanic(on:boolean){ await Preferences.set({key:'panic_on',value:on?'1':'0'}); }
@@ -236,12 +236,13 @@ jobs:
           export async function disarm(){ await Preferences.set({key:'armed_until',value:'0'}); }
           EOF
 
+          # Share gate with Always On + Master Off
           cat > src/share/share-gate.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
           import { getAlwaysOn } from '@/settings/alwaysOn';
           import { getMasterOff } from '@/settings/masterOff';
           export async function canShare(){
-            if (await getMasterOff()) return { ok:false, reason:'master_off' }; // hard OFF
+            if (await getMasterOff()) return { ok:false, reason:'master_off' };
             const panic = (await Preferences.get({key:'panic_on'})).value==='1';
             if (panic) return { ok:false, reason:'panic' };
             if (await getAlwaysOn()) {
@@ -257,50 +258,7 @@ jobs:
           }
           EOF
 
-          # Settings UI (serious) with Always On + Master Off (user-only)
-          cat > src/screens/SettingsAlwaysOn.tsx <<'EOF'
-          import * as React from 'react';
-          import { getAlwaysOn, setAlwaysOn } from '@/settings/alwaysOn';
-          import { getMasterOff, setMasterOff } from '@/settings/masterOff';
-          export default function SettingsAlwaysOn(){
-            const [loading,setLoading]=React.useState(true);
-            const [always,setAlways]=React.useState(false);
-            const [off,setOff]=React.useState(false);
-            const [pin,setPin]=React.useState('');
-            React.useEffect(()=>{(async()=>{ setAlways(await getAlwaysOn()); setOff(await getMasterOff()); setLoading(false); })();},[]);
-            async function confirm(label:string,next:boolean,setter:(b:boolean)=>Promise<void>,setLocal:(b:boolean)=>void){
-              const ok=window.confirm(label); if(!ok) return;
-              if (pin.trim()){
-                const input=prompt('Enter your settings PIN to proceed:'); if(input!==pin){ alert('Wrong PIN.'); return; }
-              }
-              await setter(next); setLocal(next); alert(next?'Enabled.':'Disabled.');
-            }
-            if (loading) return null;
-            return (
-              <div className="p-4 space-y-6">
-                <h2 className="text-lg font-semibold">Risk Controls</h2>
-                <section className="space-y-2">
-                  <h3 className="font-medium">Always On</h3>
-                  <p className="text-sm text-gray-600">When enabled, sharing + chaos are active at all times. Only Panic or Master Off will block it.</p>
-                  <button onClick={()=>confirm(always?'Disable Always On?':'Enable Always On?',!always,setAlwaysOn,setAlways)}
-                          className={`px-4 py-2 rounded-md ${always?'bg-black text-white':'bg-gray-200'}`}>{always?'ON':'OFF'}</button>
-                </section>
-                <section className="space-y-2">
-                  <h3 className="font-medium">Master Off</h3>
-                  <p className="text-sm text-gray-600">Hard OFF. Blocks all shares and chaos regardless of other settings until you disable it here.</p>
-                  <button onClick={()=>confirm(off?'Disable Master Off?':'Enable Master Off?',!off,setMasterOff,setOff)}
-                          className={`px-4 py-2 rounded-md ${off?'bg-rose-600 text-white':'bg-gray-200'}`}>{off?'ON':'OFF'}</button>
-                </section>
-                <div>
-                  <label className="block text-sm mb-1">Optional settings PIN (required to change these)</label>
-                  <input type="password" className="border rounded-md p-2 w-full" placeholder="Set a PIN (optional)" value={pin} onChange={e=>setPin(e.target.value)} />
-                </div>
-              </div>
-            );
-          }
-          EOF
-
-          # HARD/RARE UNDO (strict, short window, costly)
+          # HARD/RARE UNDO
           cat > src/chaos/undo-config.ts <<'EOF'
           export const UNDO = {
             ENABLED: true,
@@ -387,8 +345,9 @@ jobs:
           import com.getcapacitor.JSObject;
           import com.getcapacitor.Plugin;
           import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
           import com.getcapacitor.annotation.CapacitorPlugin;
-          import com.getcapacitor.annotation.PluginMethod;
+          import com.getcapacitor.annotation.PluginMethod; // will be fixed by sed
           import java.io.OutputStream;
           @CapacitorPlugin(name="GallerySaver")
           public class GallerySaverPlugin extends Plugin {
@@ -425,7 +384,7 @@ jobs:
           }
           EOF
 
-          # SocialShare (direct targets + lockouts + bypass/panic flags)
+          # SocialShare
           cat > "$PKG_DIR/SocialSharePlugin.java" <<'EOF'
           package com.memorystreamer.app;
           import android.content.Intent;
@@ -435,8 +394,9 @@ jobs:
           import com.getcapacitor.JSObject;
           import com.getcapacitor.Plugin;
           import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
           import com.getcapacitor.annotation.CapacitorPlugin;
-          import com.getcapacitor.annotation.PluginMethod;
+          import com.getcapacitor.annotation.PluginMethod; // will be fixed by sed
           import java.util.*;
           @CapacitorPlugin(name="SocialShare")
           public class SocialSharePlugin extends Plugin {
@@ -491,7 +451,7 @@ jobs:
                   intent.setPackage(pkg);
                   getActivity().startActivity(Intent.createChooser(intent, "Share"));
                   long durMs = decideLockDurationMs(target, nsfwScore, rnd);
-                  if (!BYPASS && durMs>0) locks.put(target, now + durMs);
+                  if (!BYPASS && durMs>0) locks.put(target, System.currentTimeMillis() + durMs);
                   JSObject ret = new JSObject(); ret.put("target", target); ret.put("locked", durMs>0); call.resolve(ret); return;
                 } catch (Exception ignored) {}
               }
@@ -508,15 +468,15 @@ jobs:
             private long decideLockDurationMs(String target,double nsfw,Random rnd){
               boolean personal = target.equals("instagram") || target.startsWith("twitter") || target.equals("facebook") || target.equals("discord");
               double roll = rnd.nextDouble(); long sec = 0;
-              if (nsfw >= 0.8) { if (roll < 0.7) sec = 10 + rnd.nextInt(110); } // 10s–2m
-              else { if (roll < 0.4 && personal) sec = (6*3600) + rnd.nextInt(3*24*3600); } // 6h–3d
+              if (nsfw >= 0.8) { if (roll < 0.7) sec = 10 + rnd.nextInt(110); }
+              else { if (roll < 0.4 && personal) sec = (6*3600) + rnd.nextInt(3*24*3600); }
               return sec*1000L;
             }
             private List<String> toList(JSArray arr){ List<String> out=new ArrayList<>(); for (int i=0;i<arr.length();i++){ try{ out.add(arr.getString(i)); }catch(Exception ignored){} } return out; }
           }
           EOF
 
-          # Manifest deep-link (OAuth)
+          # Manifest deep-link
           MANIFEST=android/app/src/main/AndroidManifest.xml
           if ! grep -q 'ms50' "$MANIFEST"; then
             sed -i '/<activity android:name=".MainActivity"/a\
@@ -527,6 +487,14 @@ jobs:
                   <data android:scheme="ms50" android:host="auth" />\
                 </intent-filter>' "$MANIFEST"
           fi
+
+      # --- 3.1) FIX Capacitor v7 @PluginMethod import path (annotation package → core) ---
+      - name: Fix Capacitor v7 PluginMethod imports
+        shell: bash
+        run: |
+          sed -i 's#import com\.getcapacitor\.annotation\.PluginMethod;#import com.getcapacitor.PluginMethod;#' \
+            android/app/src/main/java/com/memorystreamer/app/SocialSharePlugin.java \
+            android/app/src/main/java/com/memorystreamer/app/GallerySaverPlugin.java
 
       # --- 4) Build web (after files exist) ---
       - name: Build web assets
