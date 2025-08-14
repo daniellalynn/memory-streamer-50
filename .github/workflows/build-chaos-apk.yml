@@ -62,7 +62,7 @@ jobs:
           rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
           find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
 
-      # 3) Core modules
+      # 3) Core modules (source files)
       - name: Make src directories
         run: mkdir -p src/chaos src/nl src/upload src/components src/capacitor src/share src/settings src/verify src/screens
 
@@ -255,13 +255,11 @@ jobs:
             const input=prompt(`Type this string REVERSED quickly:\n\n${code}`); if(!input||input!==reversed){ alert('Incorrect.'); return; }
             const a=10+Math.floor(Math.random()*40), b=5+Math.floor(Math.random()*20); const t1=now();
             const ans=prompt(`${a}+${b}=? (≤1.2s)`); if(!ans||parseInt(ans,10)!==(a+b)||(now()-t1)>1200){ alert('Failed.'); return; }
-            await Preferences.set({key:'undo_cooldown_until', value: String(now()+UNDO.COOLDOWN_HOURS*3600*1000)});
-            await Preferences.set({key:'undo_penalty_until', value: String(now()+UNDO.PENALTY_LOCK_HOURS*3600*1000)});
-            onSuccess();
+            await setCooldown(UNDO.COOLDOWN_HOURS); await markUndoPenalty(UNDO.PENALTY_LOCK_HOURS); onSuccess();
           }
           EOF
 
-      # 4) New minimal UI (wording updated; no default images)
+      # 4) New minimal UI (wording updated; no presets)
       - name: Ensure base UI files exist
         run: mkdir -p src && touch src/index.css
 
@@ -313,14 +311,22 @@ jobs:
                 <section className="space-y-2">
                   <h3 className="font-medium">Always On</h3>
                   <p className="text-sm text-gray-600">When enabled, sharing + chaos are active at all times. Only Panic or Master Off will block it.</p>
-                  <button onClick={()=>confirm(always?'Disable Always On?':'Enable Always On?',!always,setAlwaysOn,setAlways)}
-                          className={`px-4 py-2 rounded-md ${always?'bg-black text-white':'bg-gray-200'}`}>{always?'ON':'OFF'}</button>
+                  <button
+                    onClick={()=>confirm(always?'Disable Always On?':'Enable Always On?',!always,setAlwaysOn,setAlways)}
+                    className={'px-4 py-2 rounded-md ' + (always?'bg-black text-white':'bg-gray-200')}
+                  >
+                    {always ? 'ON' : 'OFF'}
+                  </button>
                 </section>
                 <section className="space-y-2">
                   <h3 className="font-medium">Master Off</h3>
                   <p className="text-sm text-gray-600">Hard OFF. Blocks all shares and chaos regardless of other settings until you disable it here.</p>
-                  <button onClick={()=>confirm(off?'Disable Master Off?':'Enable Master Off?',!off,setMasterOff,setOff)}
-                          className={`px-4 py-2 rounded-md ${off?'bg-rose-600 text-white':'bg-gray-200'}`}>{off?'ON':'OFF'}</button>
+                  <button
+                    onClick={()=>confirm(off?'Disable Master Off?':'Enable Master Off?',!off,setMasterOff,setOff)}
+                    className={'px-4 py-2 rounded-md ' + (off?'bg-rose-600 text-white':'bg-gray-200')}
+                  >
+                    {off ? 'ON' : 'OFF'}
+                  </button>
                 </section>
                 <div>
                   <label className="block text-sm mb-1">Optional settings PIN</label>
@@ -331,7 +337,7 @@ jobs:
           }
           EOF
 
-      - name: Write App.tsx (new wording, no presets)
+      - name: Write App.tsx (no template literals)
         run: |
           cat > src/App.tsx <<'EOF'
           import React, { useState } from 'react';
@@ -343,7 +349,7 @@ jobs:
           export default function App(){
             const [tab,setTab]=useState<'home'|'settings'>('home');
             const [pendingImage,setPendingImage]=useState<string|null>(null);
-            const [nsfwScore] = useState(0.32); // placeholder bias
+            const [nsfwScore] = useState(0.32);
             const [includeLinkedIn,setIncludeLinkedIn]=useState(false);
 
             async function pickImage(e: React.ChangeEvent<HTMLInputElement>){
@@ -362,7 +368,7 @@ jobs:
               if (!pendingImage){ alert('Pick an image first.'); return; }
               try{
                 const res = await SocialShare.directShare({ fileUri: pendingImage, nsfwScore, includeLinkedIn });
-                alert(`Shared via: ${res.target || 'chooser'}`);
+                alert("Shared via: " + (res.target || "chooser"));
               }catch(e:any){
                 alert(typeof e?.message==='string'?e.message:'Share failed.');
               }
@@ -373,8 +379,14 @@ jobs:
                 <header className="p-4 border-b flex items-center justify-between">
                   <div className="font-semibold">Memory Streamer</div>
                   <nav className="flex gap-2">
-                    <button className={\`px-3 py-1 rounded \${tab==='home'?'bg-black text-white':'bg-gray-200'}\`} onClick={()=>setTab('home')}>Home</button>
-                    <button className={\`px-3 py-1 rounded \${tab==='settings'?'bg-black text-white':'bg-gray-200'}\`} onClick={()=>setTab('settings')}>Settings</button>
+                    <button
+                      className={'px-3 py-1 rounded ' + (tab==='home' ? 'bg-black text-white' : 'bg-gray-200')}
+                      onClick={()=>setTab('home')}
+                    >Home</button>
+                    <button
+                      className={'px-3 py-1 rounded ' + (tab==='settings' ? 'bg-black text-white' : 'bg-gray-200')}
+                      onClick={()=>setTab('settings')}
+                    >Settings</button>
                   </nav>
                 </header>
                 <main className="p-4 flex-1">
