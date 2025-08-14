@@ -13,11 +13,17 @@ jobs:
         with:
           node-version: 20
 
-      # Upgrade any @capacitor/* packages to v7 to match @capacitor/core@7
+      # Align all @capacitor/* packages to v7 to match @capacitor/core@7
       - name: Align Capacitor packages to v7
         shell: bash
         run: |
-          PKGS=$(node -e 'const p=require("./package.json"); const all={...(p.dependencies||{}), ...(p.devDependencies||{})}; const names=Object.keys(all).filter(n=>n.startsWith("@capacitor/")).map(n=>n+"@^7"); process.stdout.write(names.join(" "));')
+          PKGS=$(node - <<'NODE'
+          const p=require("./package.json");
+          const all={...(p.dependencies||{}), ...(p.devDependencies||{})};
+          const names=Object.keys(all).filter(n=>n.startsWith("@capacitor/")).map(n=>n+"@^7");
+          process.stdout.write(names.join(" "));
+          NODE
+          )
           echo "Upgrading: $PKGS"
           rm -f package-lock.json
           if [ -n "$PKGS" ]; then
@@ -33,11 +39,44 @@ jobs:
           distribution: 'temurin'
           java-version: 17
 
-      # ✅ Fix invalid Capacitor appId (no dashes, reverse-DNS)
+      # ✅ Fix invalid Capacitor appId by editing capacitor.config.*
       - name: Ensure valid Capacitor appId
         shell: bash
         run: |
-          node -e 'const fs=require("fs"); const files=["capacitor.config.ts","capacitor.config.js","capacitor.config.json"]; const VALID=/appId\s*:\s*["\'][A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+["\']/; const VALID_JSON=/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/; let f=files.find(x=>fs.existsSync(x)); if(!f){process.exit(0)} let s=fs.readFileSync(f,"utf8"); if(f.endsWith(".json")){let j=JSON.parse(s); if(!j.appId || !VALID_JSON.test(j.appId)){j.appId="com.memorystreamer.app"} fs.writeFileSync(f,JSON.stringify(j,null,2));} else { if(!VALID.test(s)){ if(/appId\s*:\s*["\'][^"\']+["\']/.test(s)){ s=s.replace(/appId\s*:\s*["\'][^"\']+["\']/, "appId: \\"com.memorystreamer.app\\""); } else { s=s.replace(/defineConfig\(\{/, "defineConfig({\\n  appId: \\"com.memorystreamer.app\\","); } fs.writeFileSync(f,s); } }'
+          cat > fix-appid.js <<'EOF'
+          const fs=require('fs');
+          const files=['capacitor.config.ts','capacitor.config.js','capacitor.config.json'];
+          const valid = id => /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(id||'');
+          const f=files.find(x=>fs.existsSync(x));
+          if(!f) process.exit(0);
+          let s=fs.readFileSync(f,'utf8');
+          if(f.endsWith('.json')){
+            const j=JSON.parse(s);
+            if(!valid(j.appId)) j.appId='com.memorystreamer.app';
+            if(!j.appName) j.appName='Memory Streamer';
+            fs.writeFileSync(f, JSON.stringify(j,null,2));
+          }else{
+            // Try to replace existing appId; if missing, inject after defineConfig({
+            if(/appId\s*:\s*["'][^"']+["']/.test(s)){
+              s=s.replace(/appId\s*:\s*["'][^"']+["']/, 'appId: "com.memorystreamer.app"');
+            }else if(/defineConfig\(\{/.test(s)){
+              s=s.replace(/defineConfig\(\{/, 'defineConfig({\n  appId: "com.memorystreamer.app",');
+            }else if(/export default defineConfig\(\{/.test(s)){
+              s=s.replace(/export default defineConfig\(\{/, 'export default defineConfig({\n  appId: "com.memorystreamer.app",');
+            }
+            if(!/appName\s*:/.test(s)){
+              s=s.replace(/appId\s*:\s*["'][^"']+["']/, m=>m+',\n  appName: "Memory Streamer"');
+            }
+            fs.writeFileSync(f,s);
+          }
+          EOF
+          node fix-appid.js
+          echo "Resulting config file:"
+          ls -1 capacitor.config.* || true
+          echo "----"
+          [ -f capacitor.config.ts ] && sed -n '1,120p' capacitor.config.ts || true
+          [ -f capacitor.config.js ] && sed -n '1,120p' capacitor.config.js || true
+          [ -f capacitor.config.json ] && cat capacitor.config.json || true
 
       - name: Ensure Android platform
         run: npx cap add android || true
