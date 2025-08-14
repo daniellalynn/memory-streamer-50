@@ -96,3 +96,101 @@ jobs:
         with:
           name: app-debug.apk
           path: android/app/build/outputs/apk/debug/*.apk
+name: Build Chaos APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # 0) Normalize Capacitor to v7 & install deps cleanly
+      - name: Align Capacitor to v7 and install
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+          const bump=(o)=>{ if(!o) return; for(const k of Object.keys(o)){ if(k.startsWith('@capacitor/')) o[k]='^7.0.0'; } };
+          bump(pkg.dependencies); bump(pkg.devDependencies);
+          fs.writeFileSync('package.json', JSON.stringify(pkg,null,2));
+          NODE
+          rm -f package-lock.json
+          npm i --no-audit --no-fund
+          npm install @capacitor/preferences
+
+      # 1) Capacitor config + viewport
+      - name: Write Capacitor config
+        shell: bash
+        run: |
+          cat > capacitor.config.ts <<'EOF'
+          import type { CapacitorConfig } from '@capacitor/cli';
+          const config: CapacitorConfig = {
+            appId: 'com.memorystreamer.app',
+            appName: 'Memory Streamer',
+            webDir: 'dist',
+            server: { androidScheme: 'https' }
+          };
+          export default config;
+          EOF
+
+      - name: Ensure viewport meta
+        shell: bash
+        run: |
+          FILE=""
+          [ -f public/index.html ] && FILE=public/index.html
+          [ -z "$FILE" ] && [ -f src/index.html ] && FILE=src/index.html
+          if [ -n "$FILE" ]; then
+            if ! grep -q 'name="viewport"' "$FILE"; then
+              awk 'BEGIN{ins=0} /<head[^>]*>/ && !ins {print; print "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"; ins=1; next} {print}' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
+            fi
+          fi
+
+      # 2) Remove default/preset images & obvious demo assets
+      - name: Remove default preset images
+        shell: bash
+        run: |
+          rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
+          find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
+
+      # 3) Core modules
+      # (all the write file steps go here exactly as in your current workflow)
+
+      # 4) New minimal UI
+      # (write UI files exactly as you have)
+
+      # 5) Android platform + native plugins; zoom fix; deep link
+      # (same as your current java/plugin steps)
+
+      # Fix template literals in App.tsx
+      - name: Fix template literals in App.tsx
+        run: sed -i 's/\\`/`/g' src/App.tsx
+
+      # 6) Build web
+      - name: Build web assets
+        run: npm run build
+
+      # 7) Java 21, sync, build APK
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - name: Sync Capacitor (plugins & native)
+        run: npx cap sync android
+
+      - name: Build debug APK
+        run: cd android && ./gradlew assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug.apk
+          path: android/app/build/outputs/apk/debug/*.apk
