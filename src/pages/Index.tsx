@@ -3,6 +3,7 @@ import { MemoryHeader } from "@/components/MemoryHeader";
 import { PhotoCard } from "@/components/PhotoCard";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { SharePrompt } from "@/components/SharePrompt";
+import { ContactTagger, Contact } from "@/components/ContactTagger";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -11,6 +12,7 @@ import heroImage from "@/assets/hero-memory-wall.jpg";
 import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { useAnnoyingOverlay, COOL_DOWN_MS } from "@/hooks/useAnnoyingOverlay";
+import { useContactPriority } from "@/hooks/useContactPriority";
 
 interface Photo {
   id: string;
@@ -18,11 +20,17 @@ interface Photo {
   title: string;
   originalDate: string;
   modifiedDate?: string;
+  taggedContact?: Contact;
 }
 
 const Index = () => {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [showUpload, setShowUpload] = useState(false);
+  
+  // Contact management
+  const contactPriority = useContactPriority();
+  const [showContactTagger, setShowContactTagger] = useState(false);
+  const [pendingPhoto, setPendingPhoto] = useState<Photo | null>(null);
 
   // Share prompt state
   const [showSharePrompt, setShowSharePrompt] = useState(false);
@@ -57,7 +65,7 @@ const Index = () => {
   }, []);
 
   const handleUpload = (files: File[]) => {
-    files.forEach((file, index) => {
+    const newPhotos = files.map((file, index) => {
       const url = URL.createObjectURL(file);
       const newPhoto: Photo = {
         id: `uploaded-${Date.now()}-${index}`,
@@ -65,10 +73,38 @@ const Index = () => {
         title: file.name.split('.')[0],
         originalDate: new Date().toISOString().split('T')[0]
       };
-      setPhotos(prev => [newPhoto, ...prev]);
+      return newPhoto;
     });
+    
+    // If single photo, show contact tagger
+    if (newPhotos.length === 1) {
+      setPendingPhoto(newPhotos[0]);
+      setShowContactTagger(true);
+    } else {
+      // Multiple photos, add without tagging
+      setPhotos(prev => [...newPhotos, ...prev]);
+      toast.success(`${files.length} photos added`);
+    }
     setShowUpload(false);
-    toast.success(`${files.length} photos added`);
+  };
+
+  const handleContactTagged = (contact: Contact) => {
+    if (!pendingPhoto) return;
+    
+    const taggedPhoto = { ...pendingPhoto, taggedContact: contact };
+    setPhotos(prev => [taggedPhoto, ...prev]);
+    contactPriority.addPhotoContact(pendingPhoto.id, contact);
+    
+    toast.success(`Photo tagged with ${contact.name} - they're now your #1 priority for this memory!`);
+    setPendingPhoto(null);
+  };
+
+  const handleContactTagSkipped = () => {
+    if (!pendingPhoto) return;
+    
+    setPhotos(prev => [pendingPhoto, ...prev]);
+    toast.success("Photo added without tagging");
+    setPendingPhoto(null);
   };
 
   const isNative = useMemo(() => {
@@ -159,13 +195,27 @@ const Index = () => {
 
   const shareWithPerson = async () => {
     if (!promptPhoto) return;
+    
+    // Get priority contacts for this photo
+    const priorities = contactPriority.getContactPriorityForPhoto(promptPhoto.id);
+    const topPriority = priorities[0];
+    
     try {
       if ((navigator as any).share && promptPhoto.url.startsWith('http')) {
-        await (navigator as any).share({ title: 'My favorite memory', url: promptPhoto.url });
+        await (navigator as any).share({ 
+          title: `💕 Sharing this intimate moment with ${topPriority?.contact.name || 'someone special'}`, 
+          url: promptPhoto.url 
+        });
       } else {
         await navigator.clipboard.writeText(promptPhoto.url);
-        toast.success('Link copied to clipboard');
+        toast.success(`Link copied - ready to send to ${topPriority?.contact.name || 'your priority contact'}!`);
       }
+      
+      // Update chat activity if we have a real contact
+      if (topPriority && topPriority.contact.id !== 'public' && topPriority.contact.id !== 'parents') {
+        contactPriority.updateChatActivity(topPriority.contact);
+      }
+      
       localStorage.setItem('annoySnoozeUntil', String(Date.now() + COOL_DOWN_MS));
       toast.info('🎯 Helpful mode paused briefly! We\'ll be back to help you share your most vulnerable moments soon!');
     } catch (e) {
@@ -298,6 +348,20 @@ const Index = () => {
         onSharePerson={shareWithPerson}
         onShareGallery={shareToGallery}
         onSharePublic={sharePublicly}
+        contactPriorities={promptPhoto ? contactPriority.getContactPriorityForPhoto(promptPhoto.id) : []}
+      />
+
+      <ContactTagger
+        open={showContactTagger}
+        onOpenChange={(open) => {
+          setShowContactTagger(open);
+          if (!open && pendingPhoto) {
+            handleContactTagSkipped();
+          }
+        }}
+        photoUrl={pendingPhoto?.url || ""}
+        photoTitle={pendingPhoto?.title || ""}
+        onTagComplete={handleContactTagged}
       />
     </div>
   );
