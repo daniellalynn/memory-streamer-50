@@ -362,7 +362,7 @@ jobs:
               if (!pendingImage){ alert('Pick an image first.'); return; }
               try{
                 const res = await SocialShare.directShare({ fileUri: pendingImage, nsfwScore, includeLinkedIn });
-                alert(\`Shared via: \${res.target || 'chooser'}\`);
+                alert(`Shared via: ${res.target || 'chooser'}`);
               }catch(e:any){
                 alert(typeof e?.message==='string'?e.message:'Share failed.');
               }
