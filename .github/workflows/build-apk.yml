@@ -39,11 +39,11 @@ jobs:
           distribution: 'temurin'
           java-version: 17
 
-      # ✅ Fix invalid Capacitor appId by editing capacitor.config.*
+      # ✅ Fix invalid Capacitor appId by editing capacitor.config.* (use .cjs to allow require)
       - name: Ensure valid Capacitor appId
         shell: bash
         run: |
-          cat > fix-appid.js <<'EOF'
+          cat > fix-appid.cjs <<'EOF'
           const fs=require('fs');
           const files=['capacitor.config.ts','capacitor.config.js','capacitor.config.json'];
           const valid = id => /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(id||'');
@@ -56,7 +56,7 @@ jobs:
             if(!j.appName) j.appName='Memory Streamer';
             fs.writeFileSync(f, JSON.stringify(j,null,2));
           }else{
-            // Try to replace existing appId; if missing, inject after defineConfig({
+            // Replace existing appId or inject it
             if(/appId\s*:\s*["'][^"']+["']/.test(s)){
               s=s.replace(/appId\s*:\s*["'][^"']+["']/, 'appId: "com.memorystreamer.app"');
             }else if(/defineConfig\(\{/.test(s)){
@@ -70,13 +70,9 @@ jobs:
             fs.writeFileSync(f,s);
           }
           EOF
-          node fix-appid.js
+          node fix-appid.cjs
           echo "Resulting config file:"
           ls -1 capacitor.config.* || true
-          echo "----"
-          [ -f capacitor.config.ts ] && sed -n '1,120p' capacitor.config.ts || true
-          [ -f capacitor.config.js ] && sed -n '1,120p' capacitor.config.js || true
-          [ -f capacitor.config.json ] && cat capacitor.config.json || true
 
       - name: Ensure Android platform
         run: npx cap add android || true
