@@ -62,7 +62,7 @@ jobs:
           rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
           find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
 
-      # 3) Core modules (split safe steps; each has its own EOF)
+      # 3) Core modules
       - name: Make src directories
         run: mkdir -p src/chaos src/nl src/upload src/components src/capacitor src/share src/settings src/verify src/screens
 
@@ -202,8 +202,8 @@ jobs:
         run: |
           cat > src/share/share-gate.ts <<'EOF'
           import { Preferences } from '@capacitor/preferences';
-          import { getAlwaysOn } from '@/settings/alwaysOn';
-          import { getMasterOff } from '@/settings/masterOff';
+          import { getAlwaysOn } from '../settings/alwaysOn';
+          import { getMasterOff } from '../settings/masterOff';
           export async function canShare(){
             if (await getMasterOff()) return { ok:false, reason:'master_off' };
             const panic = (await Preferences.get({key:'panic_on'})).value==='1';
@@ -255,7 +255,9 @@ jobs:
             const input=prompt(`Type this string REVERSED quickly:\n\n${code}`); if(!input||input!==reversed){ alert('Incorrect.'); return; }
             const a=10+Math.floor(Math.random()*40), b=5+Math.floor(Math.random()*20); const t1=now();
             const ans=prompt(`${a}+${b}=? (≤1.2s)`); if(!ans||parseInt(ans,10)!==(a+b)||(now()-t1)>1200){ alert('Failed.'); return; }
-            await setCooldown(UNDO.COOLDOWN_HOURS); await markUndoPenalty(UNDO.PENALTY_LOCK_HOURS); onSuccess();
+            await Preferences.set({key:'undo_cooldown_until', value: String(now()+UNDO.COOLDOWN_HOURS*3600*1000)});
+            await Preferences.set({key:'undo_penalty_until', value: String(now()+UNDO.PENALTY_LOCK_HOURS*3600*1000)});
+            onSuccess();
           }
           EOF
 
@@ -272,24 +274,25 @@ jobs:
           button { cursor: pointer; }
           EOF
 
-      - name: Write main.tsx (if missing)
+      - name: Write main.tsx
         run: |
-          if [ ! -f src/main.tsx ]; then
-            cat > src/main.tsx <<'EOF'
-            import React from 'react'
-            import ReactDOM from 'react-dom/client'
-            import App from './App'
-            import './index.css'
-            ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>)
-            EOF
-          fi
+          mkdir -p src
+          cat > src/main.tsx <<'EOF'
+          import React from 'react'
+          import ReactDOM from 'react-dom/client'
+          import App from './App'
+          import './index.css'
+          ReactDOM.createRoot(document.getElementById('root')!).render(
+            <React.StrictMode><App/></React.StrictMode>
+          )
+          EOF
 
       - name: Write SettingsAlwaysOn.tsx
         run: |
           cat > src/screens/SettingsAlwaysOn.tsx <<'EOF'
           import * as React from 'react';
-          import { getAlwaysOn, setAlwaysOn } from '@/settings/alwaysOn';
-          import { getMasterOff, setMasterOff } from '@/settings/masterOff';
+          import { getAlwaysOn, setAlwaysOn } from '../settings/alwaysOn';
+          import { getMasterOff, setMasterOff } from '../settings/masterOff';
           export default function SettingsAlwaysOn(){
             const [loading,setLoading]=React.useState(true);
             const [always,setAlways]=React.useState(false);
@@ -396,7 +399,7 @@ jobs:
           }
           EOF
 
-      # 5) Android platform + native plugins; zoom fix; deep link; import fix for Capacitor v7
+      # 5) Android platform + native plugins; zoom fix; deep link
       - name: Add Android project
         run: npx cap add android || true
 
@@ -440,7 +443,7 @@ jobs:
           import com.getcapacitor.JSObject;
           import com.getcapacitor.Plugin;
           import com.getcapacitor.PluginCall;
-          import com.getcapacitor.PluginMethod;           // v7 correct
+          import com.getcapacitor.PluginMethod;
           import com.getcapacitor.annotation.CapacitorPlugin;
           import java.io.OutputStream;
           @CapacitorPlugin(name="GallerySaver")
@@ -489,7 +492,7 @@ jobs:
           import com.getcapacitor.JSObject;
           import com.getcapacitor.Plugin;
           import com.getcapacitor.PluginCall;
-          import com.getcapacitor.PluginMethod;           // v7 correct
+          import com.getcapacitor.PluginMethod;
           import com.getcapacitor.annotation.CapacitorPlugin;
           import java.util.*;
           @CapacitorPlugin(name="SocialShare")
