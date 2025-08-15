@@ -1,27 +1,14 @@
-name: Build Chaos APK
-
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # Ensure Capacitor prefs installed
-      - name: Install Capacitor Preferences
-        run: npm install @capacitor/preferences
-
-      # 0) Normalize Capacitor to v7 & install deps cleanly
+      # 0) Normalize ALL @capacitor/* to v7, then install deps
       - name: Align Capacitor to v7 and install
         shell: bash
         run: |
+          # bump any @capacitor/* in package.json to ^7
           node - <<'NODE'
           const fs = require('fs');
           const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
@@ -29,8 +16,15 @@ jobs:
           bump(pkg.dependencies); bump(pkg.devDependencies);
           fs.writeFileSync('package.json', JSON.stringify(pkg,null,2));
           NODE
+
+          # clean lock & install
           rm -f package-lock.json
-          npm i --no-audit --no-fund
+          npm ci --no-audit --no-fund || npm i --no-audit --no-fund
+
+          # make sure these plugins are on v7 as well (only if present)
+          npm i @capacitor/preferences@^7 --no-audit --no-fund
+          npm i @capacitor/local-notifications@^7 --no-audit --no-fund || true
+
 
       # 1) Capacitor config + viewport
       - name: Write Capacitor config
@@ -90,6 +84,10 @@ jobs:
       # 6) Add Android platform (fixes missing platform error)
       - name: Add Android platform
         run: npx cap add android || true
+
+      # Copy web assets to Android
+      - name: Copy web assets to Android
+        run: npx cap copy android
 
       # 7) Sync Capacitor (plugins & native)
       - name: Sync Capacitor
