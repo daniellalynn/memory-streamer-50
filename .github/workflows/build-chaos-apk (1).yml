@@ -1,0 +1,105 @@
+name: Build Chaos APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Ensure Capacitor prefs installed
+      - name: Install Capacitor Preferences
+        run: npm install @capacitor/preferences
+
+      # 0) Normalize Capacitor to v7 & install deps cleanly
+      - name: Align Capacitor to v7 and install
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+          const bump=(o)=>{ if(!o) return; for(const k of Object.keys(o)){ if(k.startsWith('@capacitor/')) o[k]='^7.0.0'; } };
+          bump(pkg.dependencies); bump(pkg.devDependencies);
+          fs.writeFileSync('package.json', JSON.stringify(pkg,null,2));
+          NODE
+          rm -f package-lock.json
+          npm i --no-audit --no-fund
+
+      # 1) Capacitor config + viewport
+      - name: Write Capacitor config
+        shell: bash
+        run: |
+          cat > capacitor.config.ts <<'EOF'
+          import type { CapacitorConfig } from '@capacitor/cli';
+          const config: CapacitorConfig = {
+            appId: 'com.memorystreamer.app',
+            appName: 'Memory Streamer',
+            webDir: 'dist',
+            server: { androidScheme: 'https' }
+          };
+          export default config;
+          EOF
+
+      - name: Ensure viewport meta
+        shell: bash
+        run: |
+          FILE=""
+          [ -f public/index.html ] && FILE=public/index.html
+          [ -z "$FILE" ] && [ -f src/index.html ] && FILE=src/index.html
+          if [ -n "$FILE" ]; then
+            if ! grep -q 'name="viewport"' "$FILE"; then
+              awk 'BEGIN{ins=0} /<head[^>]*>/ && !ins {print; print "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"; ins=1; next} {print}' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
+            fi
+          fi
+
+      # 2) Remove default/preset images & obvious demo assets
+      - name: Remove default preset images
+        shell: bash
+        run: |
+          rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
+          find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
+
+      # 3) Make sure src dir exists
+      - name: Make src directories
+        run: mkdir -p src
+
+      # FIX template literals issue
+      - name: Fix template literals
+        run: |
+          if [ -f src/App.tsx ]; then
+            sed -i 's/\\`/`/g' src/App.tsx
+          fi
+
+      # 4) Build web assets
+      - name: Build web assets
+        run: npm run build
+
+      # 5) Java 21
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      # 6) Add Android platform (fixes missing platform error)
+      - name: Add Android platform
+        run: npx cap add android || true
+
+      # 7) Sync Capacitor (plugins & native)
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      # 8) Build debug APK
+      - name: Build debug APK
+        run: cd android && ./gradlew assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug.apk
+          path: android/app/build/outputs/apk/debug/*.apk
