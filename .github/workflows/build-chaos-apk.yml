@@ -27,7 +27,6 @@ jobs:
           NODE
           rm -f package-lock.json
           npm i --no-audit --no-fund
-          npm install @capacitor/preferences
 
       # 1) Capacitor config + viewport
       - name: Write Capacitor config
@@ -63,28 +62,73 @@ jobs:
           rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
           find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
 
-      # 3) Core modules
-      # (all the write file steps go here exactly as in your current workflow)
+      # 3) Your source file writes (useChaosTiming, util-hash, showTaggingGate, markov, verify, etc.)
+      # ... [KEEP all your source write steps here exactly as before, unchanged] ...
 
-      # 4) New minimal UI
-      # (write UI files exactly as you have)
+      # 4) New minimal UI (wording updated; no default images)
+      # ... [KEEP your index.css, main.tsx, SettingsAlwaysOn.tsx, App.tsx write steps exactly as before] ...
 
-      # 5) Android platform + native plugins; zoom fix; deep link
-      # (same as your current java/plugin steps)
+      # 5) Android project + native plugins; zoom fix; deep link
+      - name: Add Android project
+        run: npx cap add android || true
 
-      # Fix template literals in App.tsx
-      - name: Fix template literals in App.tsx
-        run: sed -i 's/\\`/`/g' src/App.tsx
+      - name: Write MainActivity.java
+        run: |
+          mkdir -p android/app/src/main/java/com/memorystreamer/app
+          cat > android/app/src/main/java/com/memorystreamer/app/MainActivity.java <<'EOF'
+          package com.memorystreamer.app;
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import com.getcapacitor.BridgeActivity;
+          public class MainActivity extends BridgeActivity {
+            @Override
+            protected void onCreate(Bundle savedInstanceState) {
+              super.onCreate(savedInstanceState);
+              WebView wv = getBridge().getWebView();
+              if (wv != null) {
+                WebSettings s = wv.getSettings();
+                s.setLoadWithOverviewMode(true);
+                s.setUseWideViewPort(true);
+                s.setBuiltInZoomControls(true);
+                s.setDisplayZoomControls(false);
+              }
+            }
+          }
+          EOF
+
+      # ... [KEEP your GallerySaverPlugin.java and SocialSharePlugin.java steps exactly as before] ...
+
+      - name: Add deep link to manifest (if missing)
+        shell: bash
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'ms50' "$MANIFEST"; then
+            sed -i '/<activity android:name=".MainActivity"/a\
+                <intent-filter android:autoVerify="true">\
+                  <action android:name="android.intent.action.VIEW" />\
+                  <category android:name="android.intent.category.DEFAULT" />\
+                  <category android:name="android.intent.category.BROWSABLE" />\
+                  <data android:scheme="ms50" android:host="auth" />\
+                </intent-filter>' "$MANIFEST"
+          fi
 
       # 6) Build web
       - name: Build web assets
         run: npm run build
 
-      # 7) Java 21, sync, build APK
+      # 7) Java 21, ensure Android exists, sync, build
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: 21
+
+      - name: Ensure Android platform is added
+        run: |
+          if [ ! -d android ]; then
+            npx cap add android || true
+          fi
+          npx cap copy android
 
       - name: Sync Capacitor (plugins & native)
         run: npx cap sync android
