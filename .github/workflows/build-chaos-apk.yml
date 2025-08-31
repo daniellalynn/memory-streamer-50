@@ -62,6 +62,589 @@ jobs:
           rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
           find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
 
+      # 3) Core modules (source files)
+      - name: Make src directories
+        run: mkdir -p src/chaos src/nl src/upload src/components src/capacitor src/share src/settings src/verify src/screens
+
+      - name: Write useChaosTiming.ts
+        run: |
+          cat > src/chaos/useChaosTiming.ts <<'EOF'
+          export function useChaosTiming({ min = 250, max = 4500 }: { min?: number; max?: number }) {
+            const randomDelay = () => Math.floor(min + Math.random() * (max - min));
+            const shouldPreempt = () => Math.random() < 0.15;
+            return {
+              schedule(fn: () => void) {
+                const id = setTimeout(() => { if (!shouldPreempt()) fn(); }, randomDelay());
+                return () => clearTimeout(id);
+              }
+            };
+          }
+          EOF
+
+      - name: Write util-hash.ts
+        run: |
+          cat > src/upload/util-hash.ts <<'EOF'
+          export async function sha256(s: string): Promise<string> {
+            const enc = new TextEncoder().encode(s);
+            const buf = await crypto.subtle.digest('SHA-256', enc);
+            return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+          }
+          EOF
+
+      - name: Write showTaggingGate.ts
+        run: |
+          cat > src/upload/showTaggingGate.ts <<'EOF'
+          import { Preferences } from '@capacitor/preferences';
+          import { sha256 } from './util-hash';
+          export type TagChoice = 'ex' | 'friend' | 'egirl' | 'classmate' | 'other';
+          export interface TagRecord { tag: TagChoice; note?: string; createdAt: number; verified: boolean; }
+          export async function mustTagBeforeStore(localUri: string): Promise<boolean> {
+            const key = await sha256(localUri);
+            const existing = await Preferences.get({ key: `imgtag:${key}` });
+            return !existing.value;
+          }
+          export async function saveTag(localUri: string, record: TagRecord) {
+            const key = await sha256(localUri);
+            await Preferences.set({ key: `imgtag:${key}`, value: JSON.stringify(record) });
+          }
+          EOF
+
+      - name: Write markov.ts
+        run: |
+          cat > src/nl/markov.ts <<'EOF'
+          const ORDER = 2; let model: Record<string, string[]> = Object.create(null);
+          export function rememberUserText(text:string){const t=tokenize(text);for(let i=0;i+ORDER<t.length;i++){const k=t.slice(i,i+ORDER).join('\u0001');(model[k] ||= []).push(t[i+ORDER]);}}
+          export function markovAutoComplete(prefix:string,maxTokens=24){const t=tokenize(prefix); if(t.length<ORDER) return null; let k=t.slice(t.length-ORDER).join('\u0001'); const out:string[]=[]; for(let i=0;i<maxTokens;i++){const c=model[k]; if(!c||!c.length) break; const n=c[Math.floor(Math.random()*c.length)]; out.push(n); const w=k.split('\u0001').slice(1).concat(n).join('\u0001'); k=w; if(Math.random()<0.12) break;} return out.length?out.join(' '):null;}
+          function tokenize(s:string){return s.trim().replace(/\s+/g,' ').split(' ');}
+          EOF
+
+      - name: Write verify.ts
+        run: |
+          cat > src/verify/verify.ts <<'EOF'
+          export type Tag = 'ex'|'friend'|'egirl'|'classmate'|'other';
+          export type VerifyInput = { tag: Tag; nsfwScore?: number; };
+          export type VerifyResult = { ok: boolean; signals: { remembered: boolean; platform?: string; recency?: 'recent'|'old'|'unknown'; } };
+          export async function verifyChallengeFlexible(input: VerifyInput): Promise<VerifyResult> {
+            if (Math.random() < 0.4) { const ok = await strictGate(); return { ok, signals:{remembered:ok} }; }
+            return tagAwareGate(input.tag);
+          }
+          async function strictGate(){ const modes=[holdToConfirm, phraseConfirm, minimalLogic]; const pick=modes[Math.floor(Math.random()*modes.length)]; return pick(); }
+          async function tagAwareGate(tag:Tag):Promise<VerifyResult>{
+            const res:VerifyResult={ok:false,signals:{remembered:false}};
+            const p = prompt(primaryPrompt(tag)+'\n(e.g., instagram / discord / sms / other / I don’t remember)'); if(p===null) return res;
+            const pn = (p||'').trim().toLowerCase(); res.signals.platform = ['instagram','discord','twitter','tiktok','facebook','sms'].includes(pn)?pn:'other';
+            const r = prompt('Roughly when was your last interaction?\n(e.g., 2021-10 / 2023 / unknown)'); if(r===null) return res;
+            const rn = (r||'').trim().toLowerCase(); res.signals.recency = /unknown|don.?t remember/.test(rn)?'unknown':(/\d{4}-\d{2}/.test(rn)?'recent':(/\d{4}/.test(rn)?'old':'unknown'));
+            res.signals.remembered = (res.signals.platform!=='other') || (res.signals.recency!=='unknown');
+            if (Math.random()<0.3){ const f=prompt(optionalFollowup(tag)); if(f===null) return res; }
+            res.ok=true; return res;
+          }
+          function primaryPrompt(tag:Tag){switch(tag){case 'ex':return 'Where did you mostly communicate?';case 'friend':return 'Where do/did you usually chat?';case 'classmate':return 'Where did you know them from?';case 'egirl':return 'Where did you first see her content?';default:return 'What is their connection to you?';}}
+          function optionalFollowup(tag:Tag){switch(tag){case 'ex':return 'Do you still follow each other? (yes/no/don’t know)';case 'friend':return 'How often do you interact now? (often/rarely/never)';case 'egirl':return 'Have you ever DM’d? (yes/no/no idea)';case 'classmate':return 'What year did you overlap? (YYYY or unknown)';default:return 'Add any note (optional).';}}
+          function holdToConfirm(){const ms=2000+Math.floor(Math.random()*4000);const ok=window.confirm(`Press OK and keep holding for ~${Math.round(ms/1000)}s.`);return new Promise<boolean>(res=>ok?setTimeout(()=>res(true),ms):res(false));}
+          function phraseConfirm(){const phrases=['I accept responsibility.','This choice is honest.','I intend no harm.'];const phrase=phrases[Math.floor(Math.random()*phrases.length)];const input=prompt(`Type this exactly:\n\n${phrase}`);return Promise.resolve(!!input && input===phrase);}
+          function minimalLogic(){const a=prompt('Are you knowingly misclassifying this image? Type YES or NO.');return Promise.resolve(!!a && /^(YES|NO)$/.test(a.trim().toUpperCase()));}
+          EOF
+
+      - name: Write SocialShare bridge
+        run: |
+          cat > src/capacitor/social-share.ts <<'EOF'
+          import { registerPlugin } from '@capacitor/core';
+          export type DirectShareOptions = { fileUri:string; nsfwScore?:number; includeLinkedIn?:boolean; targets?:string[] };
+          export type DirectShareResult = { target?:string; locked?:boolean };
+          export interface SocialSharePlugin {
+            directShare(options: DirectShareOptions): Promise<DirectShareResult>;
+            setBypass(options:{ on:boolean }): Promise<{ on:boolean }>;
+            setPanic(options:{ on:boolean }): Promise<{ on:boolean }>;
+          }
+          export const SocialShare = registerPlugin<SocialSharePlugin>('SocialShare');
+          EOF
+
+      - name: Write GallerySaver bridge
+        run: |
+          cat > src/capacitor/gallery-saver.ts <<'EOF'
+          import { registerPlugin } from '@capacitor/core';
+          export interface GallerySaverPlugin { saveBase64Image(options:{ base64:string; filename?:string }): Promise<{ uri:string }>; }
+          export const GallerySaver = registerPlugin<GallerySaverPlugin>('GallerySaver');
+          EOF
+
+      - name: Write settings (Always On)
+        run: |
+          cat > src/settings/alwaysOn.ts <<'EOF'
+          import { Preferences } from '@capacitor/preferences';
+          const KEY='always_on', SIG='always_on_sig', SECRET='local-fixed-pepper-v1';
+          function sign(v:string){ let h=2166136261>>>0, s=v+'|'+SECRET; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return String(h>>>0); }
+          export async function getAlwaysOn():Promise<boolean>{ const [v,s]=await Promise.all([Preferences.get({key:KEY}),Preferences.get({key:SIG})]); return !!v.value && s.value===sign(v.value) && v.value==='1'; }
+          export async function setAlwaysOn(on:boolean){ const v=on?'1':'0'; await Preferences.set({key:KEY,value:v}); await Preferences.set({key:SIG,value:sign(v)}); }
+          EOF
+
+      - name: Write settings (Master Off)
+        run: |
+          cat > src/settings/masterOff.ts <<'EOF'
+          import { Preferences } from '@capacitor/preferences';
+          const KEY='master_off', SIG='master_off_sig', SECRET='local-fixed-pepper-v1';
+          function sign(v:string){ let h=2166136261>>>0, s=v+'|'+SECRET; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return String(h>>>0); }
+          export async function getMasterOff():Promise<boolean>{ const [v,s]=await Promise.all([Preferences.get({key:KEY}),Preferences.get({key:SIG})]); return !!v.value && s.value===sign(v.value) && v.value==='1'; }
+          export async function setMasterOff(on:boolean){ const v=on?'1':'0'; await Preferences.set({key:KEY,value:v}); await Preferences.set({key:SIG,value:sign(v)}); }
+          EOF
+
+      - name: Write share state helpers
+        run: |
+          cat > src/share/state.ts <<'EOF'
+          import { Preferences } from '@capacitor/preferences';
+          export async function setPanic(on:boolean){ await Preferences.set({key:'panic_on',value:on?'1':'0'}); }
+          export async function setBypass(on:boolean){ await Preferences.set({key:'bypass_on',value:on?'1':'0'}); }
+          export async function arm(minutes=30){ const until=Date.now()+minutes*60*1000; await Preferences.set({key:'armed_until',value:String(until)}); }
+          export async function disarm(){ await Preferences.set({key:'armed_until',value:'0'}); }
+          EOF
+
+      - name: Write share gate
+        run: |
+          cat > src/share/share-gate.ts <<'EOF'
+          import { Preferences } from '@capacitor/preferences';
+          import { getAlwaysOn } from '../settings/alwaysOn';
+          import { getMasterOff } from '../settings/masterOff';
+          export async function canShare(){
+            if (await getMasterOff()) return { ok:false, reason:'master_off' };
+            const panic = (await Preferences.get({key:'panic_on'})).value==='1';
+            if (panic) return { ok:false, reason:'panic' };
+            if (await getAlwaysOn()) {
+              const bypass = (await Preferences.get({key:'bypass_on'})).value==='1';
+              return { ok:true, bypass };
+            }
+            const armedUntil = Number((await Preferences.get({key:'armed_until'})).value||0);
+            if (Date.now() < armedUntil) {
+              const bypass = (await Preferences.get({key:'bypass_on'})).value==='1';
+              return { ok:true, bypass };
+            }
+            return { ok:false, reason:'disarmed' };
+          }
+          EOF
+
+      - name: Write undo-config.ts
+        run: |
+          cat > src/chaos/undo-config.ts <<'EOF'
+          export const UNDO = {
+            ENABLED: true,
+            BASE_CHANCE: 0.18,
+            WINDOW_MS: 2000,
+            COOLDOWN_HOURS: 72,
+            PENALTY_LOCK_HOURS: 48,
+            chanceForScore(n:number){ const base=this.BASE_CHANCE; const pen=Math.max(0,1-(n*1.2)); return base*pen; }
+          };
+          EOF
+
+      - name: Write hard-undo.ts
+        run: |
+          cat > src/chaos/hard-undo.ts <<'EOF'
+          import { Preferences } from '@capacitor/preferences';
+          import { UNDO } from './undo-config';
+          const now=()=>Date.now();
+          async function getCooldownUntil(){ const v=await Preferences.get({key:'undo_cooldown_until'}); return v.value?parseInt(v.value,10):0; }
+          async function setCooldown(h:number){ const until=now()+h*3600*1000; await Preferences.set({key:'undo_cooldown_until',value:String(until)}); }
+          export async function markUndoPenalty(h:number){ const until=now()+h*3600*1000; await Preferences.set({key:'undo_penalty_until',value:String(until)}); }
+          export async function undoPenaltyActive(){ const v=await Preferences.get({key:'undo_penalty_until'}); return v.value? now()<parseInt(v.value,10) : false; }
+          function oneTimeCode(){const d=String(Math.floor(10000+Math.random()*90000));const letters=Array.from({length:2},()=>String.fromCharCode(97+Math.floor(Math.random()*26))).join('');return d+letters;}
+          export async function maybeOfferHardUndo(n:number,onStart:()=>void,onSuccess:()=>void){
+            if(!UNDO.ENABLED) return; if(now()<await getCooldownUntil()) return;
+            if(Math.random()>=UNDO.chanceForScore(n)) return;
+            const code=oneTimeCode(), reversed=code.split('').reverse().join('');
+            onStart();
+            const ok=window.confirm('Hold OK for ~1.2s (2s total window). Ready?'); if(!ok) return;
+            const t0=now(); await new Promise(r=>setTimeout(r,1200)); if(now()-t0>UNDO.WINDOW_MS){ alert('Too slow.'); return; }
+            const input=prompt(`Type this string REVERSED quickly:\n\n${code}`); if(!input||input!==reversed){ alert('Incorrect.'); return; }
+            const a=10+Math.floor(Math.random()*40), b=5+Math.floor(Math.random()*20); const t1=now();
+            const ans=prompt(`${a}+${b}=? (≤1.2s)`); if(!ans||parseInt(ans,10)!==(a+b)||(now()-t1)>1200){ alert('Failed.'); return; }
+            await setCooldown(UNDO.COOLDOWN_HOURS); await markUndoPenalty(UNDO.PENALTY_LOCK_HOURS); onSuccess();
+          }
+          EOF
+
+      # 4) New minimal UI (wording updated; no presets)
+      - name: Ensure base UI files exist
+        run: mkdir -p src && touch src/index.css
+
+      - name: Write index.css
+        run: |
+          cat > src/index.css <<'EOF'
+          :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji","Segoe UI Emoji"; }
+          html, body, #root { height: 100%; margin: 0; }
+          * { box-sizing: border-box; }
+          button { cursor: pointer; }
+          EOF
+
+      - name: Write main.tsx
+        run: |
+          mkdir -p src
+          cat > src/main.tsx <<'EOF'
+          import React from 'react'
+          import ReactDOM from 'react-dom/client'
+          import App from './App'
+          import './index.css'
+          ReactDOM.createRoot(document.getElementById('root')!).render(
+            <React.StrictMode><App/></React.StrictMode>
+          )
+          EOF
+
+      - name: Write SettingsAlwaysOn.tsx
+        run: |
+          cat > src/screens/SettingsAlwaysOn.tsx <<'EOF'
+          import * as React from 'react';
+          import { getAlwaysOn, setAlwaysOn } from '../settings/alwaysOn';
+          import { getMasterOff, setMasterOff } from '../settings/masterOff';
+          export default function SettingsAlwaysOn(){
+            const [loading,setLoading]=React.useState(true);
+            const [always,setAlways]=React.useState(false);
+            const [off,setOff]=React.useState(false);
+            const [pin,setPin]=React.useState('');
+            React.useEffect(()=>{(async()=>{ setAlways(await getAlwaysOn()); setOff(await getMasterOff()); setLoading(false); })();},[]);
+            async function confirm(label:string,next:boolean,setter:(b:boolean)=>Promise<void>,setLocal:(b:boolean)=>void){
+              const ok=window.confirm(label); if(!ok) return;
+              if (pin.trim()){
+                const input=prompt('Enter your settings PIN to proceed:'); if(input!==pin){ alert('Wrong PIN.'); return; }
+              }
+              await setter(next); setLocal(next); alert(next?'Enabled.':'Disabled.');
+            }
+            if (loading) return <div className="p-4">Loading…</div>;
+            return (
+              <div className="p-4 space-y-6">
+                <h2 className="text-xl font-semibold">Risk Controls</h2>
+                <section className="space-y-2">
+                  <h3 className="font-medium">Always On</h3>
+                  <p className="text-sm text-gray-600">When enabled, sharing + chaos are active at all times. Only Panic or Master Off will block it.</p>
+                  <button
+                    onClick={()=>confirm(always?'Disable Always On?':'Enable Always On?',!always,setAlwaysOn,setAlways)}
+                    className={'px-4 py-2 rounded-md ' + (always?'bg-black text-white':'bg-gray-200')}
+                  >
+                    {always ? 'ON' : 'OFF'}
+                  </button>
+                </section>
+                <section className="space-y-2">
+                  <h3 className="font-medium">Master Off</h3>
+                  <p className="text-sm text-gray-600">Hard OFF. Blocks all shares and chaos regardless of other settings until you disable it here.</p>
+                  <button
+                    onClick={()=>confirm(off?'Disable Master Off?':'Enable Master Off?',!off,setMasterOff,setOff)}
+                    className={'px-4 py-2 rounded-md ' + (off?'bg-rose-600 text-white':'bg-gray-200')}
+                  >
+                    {off ? 'ON' : 'OFF'}
+                  </button>
+                </section>
+                <div>
+                  <label className="block text-sm mb-1">Optional settings PIN</label>
+                  <input type="password" className="border rounded-md p-2 w-full" placeholder="Set a PIN (optional)" value={pin} onChange={e=>setPin(e.target.value)} />
+                </div>
+              </div>
+            );
+          }
+          EOF
+
+      - name: Write App.tsx (no template literals)
+        run: |
+          cat > src/App.tsx <<'EOF'
+          import React, { useState } from 'react';
+          import SettingsAlwaysOn from './screens/SettingsAlwaysOn';
+          import { canShare } from './share/share-gate';
+          import { SocialShare } from './capacitor/social-share';
+          import { GallerySaver } from './capacitor/gallery-saver';
+
+          export default function App(){
+            const [tab,setTab]=useState<'home'|'settings'>('home');
+            const [pendingImage,setPendingImage]=useState<string|null>(null);
+            const [nsfwScore] = useState(0.32);
+            const [includeLinkedIn,setIncludeLinkedIn]=useState(false);
+
+            async function pickImage(e: React.ChangeEvent<HTMLInputElement>){
+              const f = e.target.files?.[0]; if(!f) return;
+              const b64 = await new Promise<string>((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result)); r.onerror=()=>rej('read'); r.readAsDataURL(f); });
+              const saved = await GallerySaver.saveBase64Image({ base64: b64, filename: 'ms_'+Date.now()+'.jpg' });
+              setPendingImage(saved.uri);
+            }
+
+            async function shareNow(){
+              const gate = await canShare();
+              if (!gate.ok) {
+                alert(gate.reason==='panic'?'Sharing disabled (Panic).':gate.reason==='master_off'?'Master Off is ON.':'Disarmed. Open Settings.');
+                return;
+              }
+              if (!pendingImage){ alert('Pick an image first.'); return; }
+              try{
+                const res = await SocialShare.directShare({ fileUri: pendingImage, nsfwScore, includeLinkedIn });
+                alert("Shared via: " + (res.target || "chooser"));
+              }catch(e:any){
+                alert(typeof e?.message==='string'?e.message:'Share failed.');
+              }
+            }
+
+            return (
+              <div className="min-h-screen flex flex-col">
+                <header className="p-4 border-b flex items-center justify-between">
+                  <div className="font-semibold">Memory Streamer</div>
+                  <nav className="flex gap-2">
+                    <button
+                      className={'px-3 py-1 rounded ' + (tab==='home' ? 'bg-black text-white' : 'bg-gray-200')}
+                      onClick={()=>setTab('home')}
+                    >Home</button>
+                    <button
+                      className={'px-3 py-1 rounded ' + (tab==='settings' ? 'bg-black text-white' : 'bg-gray-200')}
+                      onClick={()=>setTab('settings')}
+                    >Settings</button>
+                  </nav>
+                </header>
+                <main className="p-4 flex-1">
+                  {tab==='home' && (
+                    <div className="space-y-4">
+                      <p className="text-sm text-gray-700">Load your own image. No presets. Language is minimal and serious.</p>
+                      <input type="file" accept="image/*" onChange={pickImage} />
+                      {pendingImage && <div className="text-xs text-gray-600 break-all">Saved URI: {pendingImage}</div>}
+                      <div className="flex items-center gap-3">
+                        <label className="text-sm flex items-center gap-2">
+                          <input type="checkbox" checked={includeLinkedIn} onChange={e=>setIncludeLinkedIn(e.target.checked)} />
+                          include LinkedIn (risky)
+                        </label>
+                        <button onClick={shareNow} className="px-4 py-2 rounded bg-black text-white">Share</button>
+                      </div>
+                    </div>
+                  )}
+                  {tab==='settings' && <SettingsAlwaysOn/>}
+                </main>
+              </div>
+            );
+          }
+          EOF
+
+      # 5) Android platform + native plugins; zoom fix; deep link
+      - name: Add Android project
+        run: npx cap add android || true
+
+      - name: Write MainActivity.java
+        run: |
+          mkdir -p android/app/src/main/java/com/memorystreamer/app
+          cat > android/app/src/main/java/com/memorystreamer/app/MainActivity.java <<'EOF'
+          package com.memorystreamer.app;
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import com.getcapacitor.BridgeActivity;
+          public class MainActivity extends BridgeActivity {
+            @Override
+            protected void onCreate(Bundle savedInstanceState) {
+              super.onCreate(savedInstanceState);
+              WebView wv = getBridge().getWebView();
+              if (wv != null) {
+                WebSettings s = wv.getSettings();
+                s.setLoadWithOverviewMode(true);
+                s.setUseWideViewPort(true);
+                s.setBuiltInZoomControls(true);
+                s.setDisplayZoomControls(false);
+              }
+            }
+          }
+          EOF
+
+      - name: Write GallerySaverPlugin.java
+        run: |
+          cat > android/app/src/main/java/com/memorystreamer/app/GallerySaverPlugin.java <<'EOF'
+          package com.memorystreamer.app;
+          import android.content.ContentResolver;
+          import android.content.ContentValues;
+          import android.graphics.Bitmap;
+          import android.graphics.BitmapFactory;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.provider.MediaStore;
+          import android.util.Base64;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+          import java.io.OutputStream;
+          @CapacitorPlugin(name="GallerySaver")
+          public class GallerySaverPlugin extends Plugin {
+            @PluginMethod
+            public void saveBase64Image(PluginCall call) {
+              String base64 = call.getString("base64");
+              String filename = call.getString("filename", "memory_"+System.currentTimeMillis()+".jpg");
+              try {
+                if (base64 == null || base64.isEmpty()) { call.reject("base64 required"); return; }
+                base64 = base64.replaceFirst("^data:image/[^;]+;base64,","");
+                byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+                Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bmp == null) { call.reject("invalid image"); return; }
+                ContentResolver resolver = getContext().getContentResolver();
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.MediaColumns.DISPLAY_NAME, filename);
+                values.put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg");
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                  values.put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/MemoryStreamer");
+                  values.put(MediaStore.Images.Media.IS_PENDING, 1);
+                }
+                Uri collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+                Uri item = resolver.insert(collection, values);
+                if (item == null) { call.reject("insert failed"); return; }
+                try (OutputStream os = resolver.openOutputStream(item)) {
+                  if (!bmp.compress(Bitmap.CompressFormat.JPEG, 95, os)) { call.reject("write failed"); return; }
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                  values.clear(); values.put(MediaStore.Images.Media.IS_PENDING, 0); resolver.update(item, values, null, null);
+                }
+                JSObject ret = new JSObject(); ret.put("uri", item.toString()); call.resolve(ret);
+              } catch (Exception e) { call.reject("error: "+e.getMessage()); }
+            }
+          }
+          EOF
+
+      - name: Write SocialSharePlugin.java
+        run: |
+          cat > android/app/src/main/java/com/memorystreamer/app/SocialSharePlugin.java <<'EOF'
+          package com.memorystreamer.app;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.net.Uri;
+          import com.getcapacitor.JSArray;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+          import java.util.*;
+          @CapacitorPlugin(name="SocialShare")
+          public class SocialSharePlugin extends Plugin {
+            private static final Map<String,String> PKG = new HashMap<String,String>(){{
+              put("tiktok", "com.zhiliaoapp.musically"); put("twitter_lewd","com.twitter.android");
+              put("facebook","com.facebook.katana"); put("discord","com.discord");
+              put("twitter_old","com.twitter.android"); put("instagram","com.instagram.android");
+              put("linkedin","com.linkedin.android");
+            }};
+            private static final Map<String, Long> locks = new HashMap<>();
+            private static volatile boolean BYPASS=false, PANIC=false;
+
+            @PluginMethod public void setBypass(PluginCall call){ BYPASS = call.getBoolean("on", false); JSObject ret=new JSObject(); ret.put("on",BYPASS); call.resolve(ret); }
+            @PluginMethod public void setPanic(PluginCall call){ PANIC = call.getBoolean("on", true); JSObject ret=new JSObject(); ret.put("on",PANIC); call.resolve(ret); }
+
+            @PluginMethod
+            public void directShare(PluginCall call) {
+              if (PANIC) { call.reject("panic_mode_active"); return; }
+              String fileUri = call.getString("fileUri");
+              Double nsfw = call.getDouble("nsfwScore");
+              Boolean includeLinkedIn = call.getBoolean("includeLinkedIn", true);
+              JSArray customTargets = call.getArray("targets");
+              if (fileUri == null) { call.reject("fileUri required"); return; }
+
+              List<String> pool = customTargets != null ? toList(customTargets) :
+                new ArrayList<>(Arrays.asList("tiktok","twitter_lewd","facebook","discord","twitter_old","instagram","linkedin"));
+              if (!includeLinkedIn) pool.remove("linkedin");
+
+              long now = System.currentTimeMillis();
+              if (!BYPASS) pool.removeIf(t -> locks.containsKey(t) && locks.get(t) > now);
+
+              Map<String, Double> base = new HashMap<>();
+              base.put("tiktok",0.10); base.put("twitter_lewd",0.20); base.put("facebook",0.40);
+              base.put("discord",0.50); base.put("twitter_old",0.70); base.put("instagram",0.90); base.put("linkedin",0.05);
+              double nsfwScore = nsfw != null ? nsfw.doubleValue() : 0.3;
+              Map<String, Double> weights = new HashMap<>(); Random rnd=new Random();
+              for (String t : pool) {
+                double w = base.getOrDefault(t,0.2) * (0.5 + nsfwScore);
+                w *= (0.8 + rnd.nextDouble()*0.6);
+                weights.put(t, w);
+              }
+              PackageManager pm = getContext().getPackageManager();
+              List<String> shuffled = new ArrayList<>(pool); Collections.shuffle(shuffled, rnd);
+              for (String target : shuffled) {
+                String pkg = PKG.get(target); if (pkg==null) continue;
+                if (!isInstalled(pm, pkg)) continue;
+                try {
+                  Intent intent = new Intent(Intent.ACTION_SEND);
+                  intent.setType("image/*");
+                  intent.putExtra(Intent.EXTRA_STREAM, Uri.parse(fileUri));
+                  intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                  intent.setPackage(pkg);
+                  getActivity().startActivity(Intent.createChooser(intent, "Share"));
+                  long durMs = decideLockDurationMs(target, nsfwScore, rnd);
+                  if (!BYPASS && durMs>0) locks.put(target, System.currentTimeMillis() + durMs);
+                  JSObject ret = new JSObject(); ret.put("target", target); ret.put("locked", durMs>0); call.resolve(ret); return;
+                } catch (Exception ignored) {}
+              }
+              try {
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType("image/*");
+                i.putExtra(Intent.EXTRA_STREAM, Uri.parse(fileUri));
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                getActivity().startActivity(Intent.createChooser(i, "Share"));
+                JSObject ret = new JSObject(); ret.put("target","chooser"); ret.put("locked", false); call.resolve(ret);
+              } catch (Exception e) { call.reject("share failed: "+e.getMessage()); }
+            }
+            private boolean isInstalled(PackageManager pm, String pkg){ try{ pm.getPackageInfo(pkg,0); return true; }catch(Exception e){ return false; } }
+            private long decideLockDurationMs(String target,double nsfw,Random rnd){
+              boolean personal = target.equals("instagram") || target.startsWith("twitter") || target.equals("facebook") || target.equals("discord");
+              double roll = rnd.nextDouble(); long sec = 0;
+              if (nsfw >= 0.8) { if (roll < 0.7) sec = 10 + rnd.nextInt(110); } else { if (roll < 0.4 && personal) sec = (6*3600) + rnd.nextInt(3*24*3600); }
+              return sec*1000L;
+            }
+            private List<String> toList(JSArray arr){ List<String> out=new ArrayList<>(); for (int i=0;i<arr.length();i++){ try{ out.add(arr.getString(i)); }catch(Exception ignored){} } return out; }
+          }
+          EOF
+
+      - name: Add deep link to manifest (if missing)
+        shell: bash
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'ms50' "$MANIFEST"; then
+            sed -i '/<activity android:name=".MainActivity"/a\
+                <intent-filter android:autoVerify="true">\
+                  <action android:name="android.intent.action.VIEW" />\
+                  <category android:name="android.intent.category.DEFAULT" />\
+                  <category android:name="android.intent.category.BROWSABLE" />\
+                  <data android:scheme="ms50" android:host="auth" />\
+                </intent-filter>' "$MANIFEST"
+          fi
+
+      # 6) Build web
+      - name: Build web assets
+        run: npm run build
+
+      # 7) Java 21, sync, build APK
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - name: Sync Capacitor (plugins & native)
+        run: npx cap sync android
+
+      - name: Build debug APK
+        run: cd android && ./gradlew assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug.apk
+          path: android/app/build/outputs/apk/debug/*.apk          const config: CapacitorConfig = {
+            appId: 'com.memorystreamer.app',
+            appName: 'Memory Streamer',
+            webDir: 'dist',
+            server: { androidScheme: 'https' }
+          };
+          export default config;
+          EOF
+
+      - name: Ensure viewport meta
+        shell: bash
+        run: |
+          FILE=""
+          [ -f public/index.html ] && FILE=public/index.html
+          [ -z "$FILE" ] && [ -f src/index.html ] && FILE=src/index.html
+          if [ -n "$FILE" ]; then
+            if ! grep -q 'name="viewport"' "$FILE"; then
+              awk 'BEGIN{ins=0} /<head[^>]*>/ && !ins {print; print "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"; ins=1; next} {print}' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
+            fi
+          fi
+
+      # 2) Remove default/preset images & obvious demo assets
+      - name: Remove default preset images
+        shell: bash
+        run: |
+          rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
+          find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
+
       # 3) Your source file writes (useChaosTiming, util-hash, showTaggingGate, markov, verify, etc.)
       # ... [KEEP all your source write steps here exactly as before, unchanged] ...
 
