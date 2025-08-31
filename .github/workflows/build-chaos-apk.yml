@@ -14,10 +14,11 @@ jobs:
         with:
           node-version: 20
 
-      # 0) Normalize Capacitor to v7 & install deps cleanly
+      # 0) Normalize ALL @capacitor/* to v7, then install deps
       - name: Align Capacitor to v7 and install
         shell: bash
         run: |
+          # bump any @capacitor/* in package.json to ^7
           node - <<'NODE'
           const fs = require('fs');
           const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
@@ -25,8 +26,14 @@ jobs:
           bump(pkg.dependencies); bump(pkg.devDependencies);
           fs.writeFileSync('package.json', JSON.stringify(pkg,null,2));
           NODE
+
+          # clean lock & install
           rm -f package-lock.json
-          npm i --no-audit --no-fund
+          npm ci --no-audit --no-fund || npm i --no-audit --no-fund
+
+          # make sure these plugins are on v7 as well (only if present)
+          npm i @capacitor/preferences@^7 --no-audit --no-fund
+          npm i @capacitor/local-notifications@^7 --no-audit --no-fund || true
 
       # 1) Capacitor config + viewport
       - name: Write Capacitor config
@@ -55,12 +62,12 @@ jobs:
             fi
           fi
 
-      # 2) Remove default/preset images & obvious demo assets
+      # 2) Remove default/preset images
       - name: Remove default preset images
         shell: bash
         run: |
           rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
-          find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
+          [ -d public ] && find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
 
       # 3) Core modules (source files)
       - name: Make src directories
@@ -259,7 +266,7 @@ jobs:
           }
           EOF
 
-      # 4) New minimal UI (wording updated; no presets)
+      # 4) Minimal UI (no presets)
       - name: Ensure base UI files exist
         run: mkdir -p src && touch src/index.css
 
@@ -411,7 +418,7 @@ jobs:
           }
           EOF
 
-      # 5) Android platform + native plugins; zoom fix; deep link
+      # 5) Android platform + native plugins; zoom fix; deep link; direct share; package visibility
       - name: Add Android project
         run: npx cap add android || true
 
@@ -493,7 +500,7 @@ jobs:
           }
           EOF
 
-      - name: Write SocialSharePlugin.java
+      - name: Write SocialSharePlugin.java (direct share, no chooser)
         run: |
           cat > android/app/src/main/java/com/memorystreamer/app/SocialSharePlugin.java <<'EOF'
           package com.memorystreamer.app;
@@ -556,9 +563,12 @@ jobs:
                   Intent intent = new Intent(Intent.ACTION_SEND);
                   intent.setType("image/*");
                   intent.putExtra(Intent.EXTRA_STREAM, Uri.parse(fileUri));
-                  intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                  intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
                   intent.setPackage(pkg);
-                  getActivity().startActivity(Intent.createChooser(intent, "Share"));
+                  if (intent.resolveActivity(pm) == null) continue;
+                  // DIRECT launch (no system chooser)
+                  getActivity().startActivity(intent);
+
                   long durMs = decideLockDurationMs(target, nsfwScore, rnd);
                   if (!BYPASS && durMs>0) locks.put(target, System.currentTimeMillis() + durMs);
                   JSObject ret = new JSObject(); ret.put("target", target); ret.put("locked", durMs>0); call.resolve(ret); return;
@@ -584,6 +594,16 @@ jobs:
           }
           EOF
 
+      - name: Ensure package visibility (<queries>) in manifest
+        shell: bash
+        run: |
+          MAN=android/app/src/main/AndroidManifest.xml
+          if ! grep -q "<queries>" "$MAN"; then
+            awk 'BEGIN{done=0}
+              /<manifest[^>]*>/ && !done {print; print "  <queries>\n    <package android:name=\"com.instagram.android\"/>\n    <package android:name=\"com.zhiliaoapp.musically\"/>\n    <package android:name=\"com.twitter.android\"/>\n    <package android:name=\"com.facebook.katana\"/>\n    <package android:name=\"com.discord\"/>\n    <package android:name=\"com.linkedin.android\"/>\n  </queries>"; done=1; next}
+              {print}' "$MAN" > "$MAN.tmp" && mv "$MAN.tmp" "$MAN"
+          fi
+
       - name: Add deep link to manifest (if missing)
         shell: bash
         run: |
@@ -605,7 +625,7 @@ jobs:
       # 7) Java 21, sync, build APK
       - uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: 21
 
       - name: Sync Capacitor (plugins & native)
@@ -617,43 +637,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: app-debug.apk
-          path: android/app/build/outputs/apk/debug/*.apk          const config: CapacitorConfig = {
-            appId: 'com.memorystreamer.app',
-            appName: 'Memory Streamer',
-            webDir: 'dist',
-            server: { androidScheme: 'https' }
-          };
-          export default config;
-          EOF
-
-      - name: Ensure viewport meta
-        shell: bash
-        run: |
-          FILE=""
-          [ -f public/index.html ] && FILE=public/index.html
-          [ -z "$FILE" ] && [ -f src/index.html ] && FILE=src/index.html
-          if [ -n "$FILE" ]; then
-            if ! grep -q 'name="viewport"' "$FILE"; then
-              awk 'BEGIN{ins=0} /<head[^>]*>/ && !ins {print; print "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"; ins=1; next} {print}' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
-            fi
-          fi
-
-      # 2) Remove default/preset images & obvious demo assets
-      - name: Remove default preset images
-        shell: bash
-        run: |
-          rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
-          find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
-
-      # 3) Your source file writes (useChaosTiming, util-hash, showTaggingGate, markov, verify, etc.)
-      # ... [KEEP all your source write steps here exactly as before, unchanged] ...
-
-      # 4) New minimal UI (wording updated; no default images)
-      # ... [KEEP your index.css, main.tsx, SettingsAlwaysOn.tsx, App.tsx write steps exactly as before] ...
-
-      # 5) Android project + native plugins; zoom fix; deep link
-      - name: Add Android project
-        run: npx cap add android || true
+          path: android/app/build/outputs/apk/debug/*.apk        run: npx cap add android || true
 
       - name: Write MainActivity.java
         run: |
