@@ -1,40 +1,67 @@
 name: Build Chaos APK
 
 on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # Reasonable timeout
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
-          node-version: 20
+          flutter-version: 3.13.9
+          channel: stable
 
-      # 0) Normalize ALL @capacitor/* to v7, then install deps
-      - name: Align Capacitor to v7 and install
-        shell: bash
+      - name: Flutter Doctor
+        run: flutter doctor -v
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Cache Flutter dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.pub-cache
+            /opt/flutter/packages
+          key: ${{ runner.os }}-flutter-deps-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-deps-
+
+      - name: Install Java JDK
         run: |
-          # bump any @capacitor/* in package.json to ^7
-          node - <<'NODE'
-          const fs = require('fs');
-          const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
-          const bump=(o)=>{ if(!o) return; for(const k of Object.keys(o)){ if(k.startsWith('@capacitor/')) o[k]='^7.0.0'; } };
-          bump(pkg.dependencies); bump(pkg.devDependencies);
-          fs.writeFileSync('package.json', JSON.stringify(pkg,null,2));
-          NODE
+          sudo apt-get update
+          sudo apt-get install -y openjdk-17-jdk  # Or a newer version like openjdk-21-jdk
 
-          # clean lock & install
-          rm -f package-lock.json
-          npm ci --no-audit --no-fund || npm i --no-audit --no-fund
+      - name: Sign APK
+        env:
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_FILE" > keystore.jks
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore keystore.jks build/app/outputs/apk/release/app-release.apk "$KEY_ALIAS"
+          zipalign -v 4 build/app/outputs/apk/release/app-release.apk app-release-aligned.apk
 
-          # make sure these plugins are on v7 as well (only if present)
-          npm i @capacitor/preferences@^7 --no-audit --no-fund
-          npm i @capacitor/local-notifications@^7 --no-audit --no-fund || true
-
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4  # Changed to v4
+        with:
+          name: chaos-apk-${{ github.run_number }}-${{ github.run_id }}.apk
+          path: build/app/outputs/apk/release/app-release-aligned.apk
+          retention-days: 5
       # 1) Capacitor config + viewport
       - name: Write Capacitor config
         shell: bash
