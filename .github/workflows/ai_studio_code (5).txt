@@ -1,0 +1,74 @@
+name: Build Chaos APK - Gimmeful Edition!
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    environment:
+      name: chaos-build-env
+      url: https://example.com/chaos-builds  # Replace with a fun URL
+
+    steps:
+      - name: Checkout code 🚀
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter ✨
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.13.9
+          channel: stable
+
+      - name: Flutter Doctor 🩺
+        run: flutter doctor -v
+
+      - name: Get dependencies 📦
+        run: flutter pub get
+
+      - name: Cache Flutter dependencies 💾
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.pub-cache
+            /opt/flutter/packages
+          key: ${{ runner.os }}-flutter-deps-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-deps-
+
+      - name: Build APK 🔨
+        run: flutter build apk --split-per-abi --build-mode release
+
+      - name: Random Motivational Quote 🌟
+        run: |
+          QUOTE=$(curl -s https://zenquotes.io/api/random)
+          echo "✨ Motivational Quote: $QUOTE ✨"
+
+      - name: Sign APK 🔑 (with a little drama)
+        env:
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: |
+          echo "⏳ Preparing to sign the APK... this is a critical moment! ⏳"
+          echo "$KEYSTORE_FILE" > keystore.jks
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore keystore.jks build/app/outputs/apk/release/app-release.apk "$KEY_ALIAS"
+          zipalign -v 4 build/app/outputs/apk/release/app-release.apk app-release-aligned.apk
+          echo "🎉 APK successfully signed!  Phew! 🎉"
+
+      - name: Upload APK Artifact 📤
+        uses: actions/upload-artifact@v3
+        with:
+          name: chaos-apk-${{ github.run_number }}-${{ github.run_id }}-with-sparkles.apk
+          path: build/app/outputs/apk/release/app-release-aligned.apk
+          retention-days: 5
+
+      - name: Celebrate! 🥳
+        run: echo "Workflow completed successfully! Time for a virtual high-five! ✋"
