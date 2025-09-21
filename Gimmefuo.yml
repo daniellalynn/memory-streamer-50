@@ -71,4 +71,19 @@ jobs:
           retention-days: 5
 
       - name: Celebrate! 🥳
+        run: echo "Workflow completed successfully! Time for a virtual high-five! ✋"        run: |
+          echo "⏳ Preparing to sign the APK... this is a critical moment! ⏳"
+          echo "$KEYSTORE_FILE" > keystore.jks
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore keystore.jks build/app/outputs/apk/release/app-release.apk "$KEY_ALIAS"
+          zipalign -v 4 build/app/outputs/apk/release/app-release.apk app-release-aligned.apk
+          echo "🎉 APK successfully signed!  Phew! 🎉"
+
+      - name: Upload APK Artifact 📤
+        uses: actions/upload-artifact@v3
+        with:
+          name: chaos-apk-${{ github.run_number }}-${{ github.run_id }}-with-sparkles.apk
+          path: build/app/outputs/apk/release/app-release-aligned.apk
+          retention-days: 5
+
+      - name: Celebrate! 🥳
         run: echo "Workflow completed successfully! Time for a virtual high-five! ✋"
