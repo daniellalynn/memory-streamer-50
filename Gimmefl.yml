@@ -1,4 +1,4 @@
-name: Build Chaos APK - Gimmeful Edition!
+name: Build Chaos APK
 
 on:
   push:
@@ -12,29 +12,53 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
-    environment:
-      name: chaos-build-env
-      url: https://example.com/chaos-builds  # Replace with a fun URL
 
     steps:
-      - name: Checkout code 🚀
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Flutter ✨
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.13.9
           channel: stable
 
-      - name: Flutter Doctor 🩺
+      - name: Flutter Doctor
         run: flutter doctor -v
 
-      - name: Get dependencies 📦
+      - name: Get dependencies
         run: flutter pub get
 
-      - name: Cache Flutter dependencies 💾
+      - name: Cache Flutter dependencies
         uses: actions/cache@v3
         with:
+          path: |
+            ~/.pub-cache
+            /opt/flutter/packages
+          key: ${{ runner.os }}-flutter-deps-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-deps-
+
+      - name: Build APK
+        run: flutter build apk --split-per-abi --build-mode release
+
+      - name: Sign APK
+        env:
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_FILE" > keystore.jks
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore keystore.jks build/app/outputs/apk/release/app-release.apk "$KEY_ALIAS"
+          zipalign -v 4 build/app/outputs/apk/release/app-release.apk app-release-aligned.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: chaos-apk-${{ github.run_number }}-${{ github.run_id }}.apk
+          path: build/app/outputs/apk/release/app-release-aligned.apk
+          retention-days: 5        with:
           path: |
             ~/.pub-cache
             /opt/flutter/packages
