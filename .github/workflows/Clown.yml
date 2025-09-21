@@ -1,0 +1,111 @@
+name: Build Chaos APK - The Longest Possible Edition
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60  # Increase timeout for the long process
+    environment:
+      name: chaos-build-env
+      url: https://example.com/chaos-builds
+
+    steps:
+      - name: Checkout code 🚀
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter ✨
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.13.9
+          channel: stable
+
+      - name: Flutter Doctor 🩺
+        run: flutter doctor -v
+
+      - name: Get dependencies 📦
+        run: flutter pub get
+
+      - name: Cache Flutter dependencies 💾
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.pub-cache
+            /opt/flutter/packages
+          key: ${{ runner.os }}-flutter-deps-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-deps-
+
+      - name: Run Flutter Analyze 🔍
+        run: flutter analyze
+
+      - name: Run Flutter Format 🎨
+        run: flutter format .
+
+      - name: Run Unit Tests 🧪
+        run: flutter test test/unit
+
+      - name: Run Widget Tests 🖼️
+        run: flutter test test/widget
+
+      - name: Run Integration Tests 🔗
+        run: flutter drive --target=test_driver/integration_test.dart
+
+      - name: Check Code Coverage 📊
+        run: flutter test --coverage && flutter pub global activate coverage && flutter pub global run coverage:collect && flutter pub global run coverage:format
+
+      - name: Build APK 🔨
+        run: flutter build apk --split-per-abi --build-mode release
+
+      - name: Random Motivational Quote 🌟
+        run: |
+          QUOTE=$(curl -s https://zenquotes.io/api/random)
+          echo "✨ Motivational Quote: $QUOTE ✨"
+
+      - name: Sign APK 🔑 (with a little drama)
+        env:
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: |
+          echo "⏳ Preparing to sign the APK... this is a critical moment! ⏳"
+          echo "$KEYSTORE_FILE" > keystore.jks
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore keystore.jks build/app/outputs/apk/release/app-release.apk "$KEY_ALIAS"
+          zipalign -v 4 build/app/outputs/apk/release/app-release.apk app-release-aligned.apk
+          echo "🎉 APK successfully signed!  Phew! 🎉"
+
+      - name: Check APK Size 📏
+        run: ls -l build/app/outputs/apk/release/app-release-aligned.apk
+
+      - name: Upload APK Artifact 📤
+        uses: actions/upload-artifact@v3
+        with:
+          name: chaos-apk-${{ github.run_number }}-${{ github.run_id }}-with-sparkles.apk
+          path: build/app/outputs/apk/release/app-release-aligned.apk
+          retention-days: 5
+
+      - name: Send Slack Notification 💬 (Placeholder - requires Slack integration)
+        run: echo "Sending Slack notification... (not actually implemented)"
+
+      - name: Celebrate! 🥳
+        run: echo "Workflow completed successfully! Time for a virtual high-five! ✋"
+
+      - name: Another Random Step 🤪
+        run: echo "Just adding more steps to make it longer..."
+
+      - name: Yet Another Step 🤯
+        run: echo "Seriously, this is getting ridiculous..."
+
+      - name: And One More... 😵‍💫
+        run: echo "I apologize for this excessive workflow..."
+
+      - name: Final Step - Deep Breath 😮‍💨
+        run: echo "Workflow finished.  Please don't use this in production."
