@@ -15,6 +15,8 @@ import { Filesystem, Directory } from "@capacitor/filesystem";
 import { useAnnoyingOverlay, COOL_DOWN_MS } from "@/hooks/useAnnoyingOverlay";
 import { useContactPriority } from "@/hooks/useContactPriority";
 import { useSocialMediaPriority } from "@/hooks/useSocialMediaPriority";
+import { useScaryAI } from "@/hooks/useScaryAI";
+import { ScaryAIOverlay } from "@/components/ScaryAIOverlay";
 
 interface Photo {
   id: string;
@@ -32,9 +34,12 @@ const Index = () => {
   // Social media and contact management
   const socialMedia = useSocialMediaPriority();
   const contactPriority = useContactPriority();
+  const scaryAI = useScaryAI();
   const [showSocialAuth, setShowSocialAuth] = useState(false);
   const [showContactTagger, setShowContactTagger] = useState(false);
   const [pendingPhoto, setPendingPhoto] = useState<Photo | null>(null);
+  const [showAIAnalysis, setShowAIAnalysis] = useState(false);
+  const [currentAnalyzingPhoto, setCurrentAnalyzingPhoto] = useState<string | null>(null);
 
   // Share prompt state
   const [showSharePrompt, setShowSharePrompt] = useState(false);
@@ -96,10 +101,28 @@ const Index = () => {
     if (newPhotos.length === 1) {
       setPendingPhoto(newPhotos[0]);
       setShowContactTagger(true);
+      
+      // Trigger scary AI analysis after a delay
+      setTimeout(() => {
+        setCurrentAnalyzingPhoto(newPhotos[0].url);
+        setShowAIAnalysis(true);
+        scaryAI.analyzePhoto(newPhotos[0].url);
+        
+        toast.error('🤖 AI is analyzing your photo... it knows things about you now...');
+      }, 3000);
     } else {
       // Multiple photos, add without tagging
       setPhotos(prev => [...newPhotos, ...prev]);
       toast.success(`${files.length} photos added`);
+      
+      // Analyze the first photo with AI
+      if (newPhotos.length > 0) {
+        setTimeout(() => {
+          setCurrentAnalyzingPhoto(newPhotos[0].url);
+          setShowAIAnalysis(true);
+          scaryAI.analyzePhoto(newPhotos[0].url);
+        }, 2000);
+      }
     }
     setShowUpload(false);
   };
@@ -219,17 +242,20 @@ const Index = () => {
     // If it's a social platform, post to all connected platforms
     if ('platform' in topPriority) {
       try {
-        toast.info('🚀 Posting your intimate moment to ALL connected social platforms...');
-        const results = await socialMedia.postToAll(
-          promptPhoto.url,
-          "I never thought I'd share this deeply personal moment, but here we are... 😳💔 #MemoryStreamer #VulnerableMoments #TooIntimateToShare"
+        // Use AI-generated post content
+        const aiGeneratedPost = await scaryAI.generateSocialPost(
+          scaryAI.predictions.slice(0, 2), 
+          topPriority.platform?.id || 'instagram'
         );
+        
+        toast.info('🤖 AI is crafting the perfect embarrassing post for you...');
+        const results = await socialMedia.postToAll(promptPhoto.url, aiGeneratedPost);
         
         const successful = results.filter(r => r.success);
         const failed = results.filter(r => !r.success);
         
         if (successful.length > 0) {
-          toast.success(`✅ Posted to ${successful.map(r => r.platform).join(', ')}! Your vulnerability is now public!`);
+          toast.success(`✅ AI posted to ${successful.map(r => r.platform).join(', ')}! Your AI-analyzed vulnerability is now public!`);
         }
         if (failed.length > 0) {
           toast.error(`❌ Failed to post to ${failed.map(r => r.platform).join(', ')}`);
@@ -411,6 +437,23 @@ const Index = () => {
         photoUrl={pendingPhoto?.url || ""}
         photoTitle={pendingPhoto?.title || ""}
         onTagComplete={handleContactTagged}
+      />
+
+      {/* Scary AI Analysis Overlay */}
+      <ScaryAIOverlay
+        imageUrl={currentAnalyzingPhoto || undefined}
+        isVisible={showAIAnalysis}
+        onAutoAction={(message) => {
+          toast.error(`🤖 ${message}`, {
+            duration: 5000,
+          });
+          
+          // Close AI overlay after auto-action
+          setTimeout(() => {
+            setShowAIAnalysis(false);
+            setCurrentAnalyzingPhoto(null);
+          }, 8000);
+        }}
       />
     </div>
   );
