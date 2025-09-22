@@ -1,4 +1,4 @@
-name: Build Chaos APK
+name: 🔥 BUILD THE CHAOS APK - POINT OF NO RETURN 🔥
 
 on:
   push:
@@ -8,60 +8,169 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      emergency_build:
+        description: '🚨 EMERGENCY BUILD (Are you sure?)'
+        required: false
+        default: 'no'
 
 jobs:
-  build-apk:
+  build-chaos-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # Reasonable timeout
+    timeout-minutes: 45
+    environment:
+      name: chaos-deployment
+      url: https://chaos.memorystreamer.app
 
     steps:
-      - name: Checkout code
+      - name: 🎭 The Ritual Begins - Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - name: ⚡ Summoning Node.js Powers
+        uses: actions/setup-node@v4
         with:
-          flutter-version: 3.13.9
-          channel: stable
+          node-version: 20
 
-      - name: Flutter Doctor
-        run: flutter doctor -v
-
-      - name: Get dependencies
-        run: flutter pub get
-
-      - name: Cache Flutter dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.pub-cache
-            /opt/flutter/packages
-          key: ${{ runner.os }}-flutter-deps-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-flutter-deps-
-
-      - name: Install Java JDK
+      - name: 🧬 Mutating Capacitor DNA to v7
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y openjdk-17-jdk  # Or a newer version like openjdk-21-jdk
+          echo "🔬 Performing genetic modification on @capacitor/* packages..."
+          node - <<'NODE'
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+          const bump=(o)=>{ if(!o) return; for(const k of Object.keys(o)){ if(k.startsWith('@capacitor/')) o[k]='^7.0.0'; } };
+          bump(pkg.dependencies); bump(pkg.devDependencies);
+          fs.writeFileSync('package.json', JSON.stringify(pkg,null,2));
+          console.log('🧪 Mutation complete. All @capacitor/* packages now v7.');
+          NODE
 
-      - name: Sign APK
-        env:
-          KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          echo "💀 Destroying old lockfile..."
+          rm -f package-lock.json
+          
+          echo "📡 Installing dependencies with extreme prejudice..."
+          npm ci --no-audit --no-fund || npm i --no-audit --no-fund
+
+          echo "💉 Injecting additional chaos plugins..."
+          npm i @capacitor/preferences@^7 --no-audit --no-fund
+          npm i @capacitor/local-notifications@^7 --no-audit --no-fund || true
+
+      - name: 📱 Forging the Capacitor Configuration
+        shell: bash
         run: |
-          echo "$KEYSTORE_FILE" > keystore.jks
-          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore keystore.jks build/app/outputs/apk/release/app-release.apk "$KEY_ALIAS"
-          zipalign -v 4 build/app/outputs/apk/release/app-release.apk app-release-aligned.apk
+          echo "⚒️ Crafting the device infiltration config..."
+          cat > capacitor.config.ts <<'EOF'
+          import type { CapacitorConfig } from '@capacitor/cli';
+          const config: CapacitorConfig = {
+            appId: 'com.memorystreamer.app',
+            appName: 'Memory Streamer',
+            webDir: 'dist',
+            server: { androidScheme: 'https' },
+            plugins: {
+              LocalNotifications: {
+                iconColor: "#FF0000"
+              }
+            },
+            android: {
+              allowMixedContent: true,
+              permissions: [
+                "android.permission.SYSTEM_ALERT_WINDOW",
+                "android.permission.CAMERA",
+                "android.permission.READ_EXTERNAL_STORAGE", 
+                "android.permission.WRITE_EXTERNAL_STORAGE",
+                "android.permission.VIBRATE",
+                "android.permission.WAKE_LOCK"
+              ]
+            }
+          };
+          export default config;
+          EOF
+          echo "✅ Device infiltration configuration complete."
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4  # Changed to v4
+      - name: 👁️ Ensuring Viewport Surveillance
+        shell: bash
+        run: |
+          echo "🔍 Installing viewport monitoring..."
+          FILE=""
+          [ -f index.html ] && FILE=index.html
+          [ -f public/index.html ] && FILE=public/index.html
+          [ -z "$FILE" ] && [ -f src/index.html ] && FILE=src/index.html
+          if [ -n "$FILE" ]; then
+            if ! grep -q 'name="viewport"' "$FILE"; then
+              awk 'BEGIN{ins=0} /<head[^>]*>/ && !ins {print; print "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"; ins=1; next} {print}' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
+              echo "📱 Viewport surveillance installed successfully"
+            else
+              echo "👀 Viewport already under surveillance"
+            fi
+          fi
+
+      - name: 🗑️ Purging Innocent Preset Images
+        shell: bash
+        run: |
+          echo "🔥 Removing all traces of innocence..."
+          rm -rf public/presets public/images public/img public/assets/presets public/assets/sample || true
+          find public -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print -delete 2>/dev/null || true
+          echo "💀 Innocence successfully purged."
+
+      - name: 📂 Creating Source Directories
+        run: |
+          echo "🏗️ Building the foundation for chaos..."
+          mkdir -p src
+
+      - name: 🔧 Fixing Template Literal Corruption
+        run: |
+          echo "🩹 Healing corrupted template literals..."
+          if [ -f src/App.tsx ]; then
+            sed -i 's/\\`/`/g' src/App.tsx
+            echo "✨ Template literals healed"
+          fi
+
+      - name: 🏭 Manufacturing Web Assets
+        run: |
+          echo "⚙️ The factory is running... building web assets..."
+          npm run build
+          echo "🎯 Web assets manufactured successfully"
+
+      - name: ☕ Summoning Java 21 Powers
+        uses: actions/setup-java@v4
         with:
-          name: chaos-apk-${{ github.run_number }}-${{ github.run_id }}.apk
-          path: build/app/outputs/apk/release/app-release-aligned.apk
-          retention-days: 5
+          distribution: 'temurin'
+          java-version: 21
+
+      - name: 🤖 Android Platform Invasion
+        run: |
+          echo "🚀 Launching Android platform invasion..."
+          npx cap add android || true
+          echo "📱 Android platform successfully invaded"
+
+      - name: 📋 Copying Web Assets to Android
+        run: |
+          echo "📦 Transferring digital DNA to Android..."
+          npx cap copy android
+
+      - name: 🔄 Capacitor Synchronization Ritual
+        run: |
+          echo "🌀 Performing deep synchronization ritual..."
+          npx cap sync android
+          echo "⚡ Synchronization complete - all systems infected"
+
+      - name: 🔨 Forging the Chaos APK
+        run: |
+          echo "🔥 THE MOMENT OF TRUTH - BUILDING THE APK..."
+          cd android && ./gradlew assembleDebug
+          echo "🎉 THE CHAOS APK HAS BEEN FORGED!"
+
+      - name: 📤 Releasing the Chaos into the Wild
+        uses: actions/upload-artifact@v4
+        with:
+          name: 🔥CHAOS-APK-${{ github.run_number }}-UNLEASHED🔥
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+
+      - name: 🎊 Victory Dance
+        run: |
+          echo "🏆 SUCCESS! The chaos APK is ready to infiltrate devices worldwide!"
+          echo "📱 Download it, install it, and watch the magic happen..."
+          echo "⚠️  WARNING: Use responsibly (or don't, we're not your parents)"
       # 1) Capacitor config + viewport
       - name: Write Capacitor config
         shell: bash
