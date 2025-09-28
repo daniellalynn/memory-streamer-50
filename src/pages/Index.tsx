@@ -14,9 +14,11 @@ import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { useAnnoyingOverlay, COOL_DOWN_MS } from "@/hooks/useAnnoyingOverlay";
 import { useRealPhotos } from "@/hooks/useRealPhotos";
+import { useOAuthManager } from "@/hooks/useOAuthManager";
 import { useContactPriority } from "@/hooks/useContactPriority";
 import { useSocialMediaPriority } from "@/hooks/useSocialMediaPriority";
 import { useScaryAI } from "@/hooks/useScaryAI";
+import { SocialDashboard } from "@/components/SocialDashboard";
 import { ScaryAIOverlay } from "@/components/ScaryAIOverlay";
 
 interface Photo {
@@ -57,6 +59,10 @@ const Index = () => {
   const [pendingPhoto, setPendingPhoto] = useState<Photo | null>(null);
   const [showAIAnalysis, setShowAIAnalysis] = useState(false);
   const [currentAnalyzingPhoto, setCurrentAnalyzingPhoto] = useState<string | null>(null);
+  const [showSocialDashboard, setShowSocialDashboard] = useState(false);
+
+  // OAuth and social embedding
+  const { embeddedContent, isAuthenticated } = useOAuthManager();
 
   // Share prompt state
   const [showSharePrompt, setShowSharePrompt] = useState(false);
@@ -64,7 +70,7 @@ const Index = () => {
 
   // Check for social auth on app start - FORCE IMMEDIATELY
   useEffect(() => {
-    const hasConnectedSocial = socialMedia.platforms.some(p => p.isConnected);
+    const hasConnectedSocial = socialMedia.platforms.some(p => isAuthenticated(p.id));
     if (!hasConnectedSocial) {
       // IMMEDIATELY force social auth - no delay
       setTimeout(() => {
@@ -75,10 +81,11 @@ const Index = () => {
         });
       }, 500);
     } else {
-      // If connected, force grab more photos
+      // If connected, force grab more photos AND show dashboard
       forceGrabMorePhotos();
+      setShowSocialDashboard(true);
     }
-  }, [socialMedia.platforms, forceGrabMorePhotos]);
+  }, [socialMedia.platforms, forceGrabMorePhotos, isAuthenticated]);
 
   // AGGRESSIVE overlay/auto-share engine with ALL photos (real + uploaded)
   useAnnoyingOverlay(allPhotos as any);
@@ -379,6 +386,13 @@ const Index = () => {
           </div>
         ) : (
           <div>
+            {/* Social Dashboard - Shows embedded widgets when connected */}
+            {showSocialDashboard && (
+              <div className="mb-8">
+                <SocialDashboard />
+              </div>
+            )}
+
             <div className="flex items-center justify-between mb-8">
               <div>
                 <h2 className="text-3xl font-bold mb-2">Your Memory Stream</h2>
@@ -435,7 +449,8 @@ const Index = () => {
         onOpenChange={setShowSocialAuth}
         onComplete={() => {
           setShowSocialAuth(false);
-          toast.success('🎉 All social media connected! Your intimate moments are now ready for mass distribution!');
+          setShowSocialDashboard(true);
+          toast.success('🎉 All social media connected! Your accounts are now embedded and communicating in real-time!');
         }}
       />
 

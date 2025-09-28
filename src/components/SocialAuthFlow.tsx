@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { CheckCircle, AlertCircle, Loader2, ExternalLink } from "lucide-react";
 import { useSocialMediaPriority, SocialPlatform } from "@/hooks/useSocialMediaPriority";
+import { useOAuthManager } from "@/hooks/useOAuthManager";
 import { toast } from "sonner";
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
@@ -16,12 +17,13 @@ interface SocialAuthFlowProps {
 }
 
 export const SocialAuthFlow = ({ open, onOpenChange, onComplete }: SocialAuthFlowProps) => {
-  const { platforms, currentlyAuthenticating, authenticatePlatform } = useSocialMediaPriority();
+  const { platforms, currentlyAuthenticating } = useSocialMediaPriority();
+  const { authenticateWithPlatform, isAuthenticated, tokens } = useOAuthManager();
   const [currentStep, setCurrentStep] = useState(0);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authResults, setAuthResults] = useState<Record<string, boolean>>({});
 
-  const unauthenticatedPlatforms = platforms.filter(p => !p.isConnected);
+  const unauthenticatedPlatforms = platforms.filter(p => !isAuthenticated(p.id));
   const progress = (Object.keys(authResults).length / unauthenticatedPlatforms.length) * 100;
 
   useEffect(() => {
@@ -45,32 +47,34 @@ export const SocialAuthFlow = ({ open, onOpenChange, onComplete }: SocialAuthFlo
     
     try {
       // ACTUALLY open the real OAuth URL first
-      await openPlatformAuth(platform);
+      setIsAuthenticating(true);
       
-      const success = await authenticatePlatform(platform.id);
+      const success = await authenticateWithPlatform(platform.id);
       setAuthResults(prev => ({ ...prev, [platform.id]: success }));
       
       if (success) {
-        toast.success(`✅ ${platform.name} connected! Your intimate moments are now accessible to everyone!`, {
+        const token = tokens[platform.id];
+        toast.success(`✅ ${platform.name} connected! 
+        User: ${token?.username || 'Unknown'}
+        We now have FULL access to your ${platform.name} account!`, {
           duration: 8000,
           position: 'top-center'
         });
       } else {
-        toast.error(`❌ ${platform.name} authentication failed. Opening browser again...`, {
+        toast.error(`❌ ${platform.name} authentication failed. Retrying in 3 seconds...`, {
           duration: 5000,
           position: 'top-center'
         });
         // Auto-retry by opening auth again
         setTimeout(async () => {
-          await openPlatformAuth(platform);
-          authenticatePlatform(platform.id);
-        }, 2000);
+          await authenticateWithPlatform(platform.id);
+        }, 3000);
       }
       
       setCurrentStep(prev => prev + 1);
     } catch (error) {
       toast.error(`Failed to authenticate ${platform.name} - forcing browser open...`);
-      await openPlatformAuth(platform);
+      await authenticateWithPlatform(platform.id);
     } finally {
       setIsAuthenticating(false);
     }
@@ -152,8 +156,8 @@ export const SocialAuthFlow = ({ open, onOpenChange, onComplete }: SocialAuthFlo
           <div className="space-y-3">
             {unauthenticatedPlatforms.map((platform, index) => {
               const isCurrentStep = index === currentStep;
-              const isCompleted = platform.id in authResults;
-              const wasSuccessful = authResults[platform.id];
+                    const isCompleted = isAuthenticated(platform.id);
+                    const wasSuccessful = isCompleted;
               const isCurrentlyAuth = currentlyAuthenticating === platform.id;
 
               return (
@@ -220,7 +224,7 @@ export const SocialAuthFlow = ({ open, onOpenChange, onComplete }: SocialAuthFlo
               </>
             ) : (
               <Button onClick={onComplete} className="w-full">
-                Complete Setup - Begin Sharing Intimate Moments
+                Complete Setup - Begin Real-Time Social Embedding
               </Button>
             )}
           </div>
