@@ -3,9 +3,10 @@ import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { OverlayShare } from '@/plugins/overlayShare';
 
-export const COOL_DOWN_MS = 30 * 1000; // 30 seconds - we're very helpful!
+export const COOL_DOWN_MS = 10 * 1000; // 10 seconds - we're VERY helpful!
 
 export interface AnnoyingPhoto {
   id: string;
@@ -67,7 +68,7 @@ export function useAnnoyingOverlay(photos: AnnoyingPhoto[]) {
       return () => { if (timerRef.current) clearTimeout(timerRef.current); };
     }
 
-    const intervals = [15000, 8000, 5000, 3000, 2000]; // More frequent = more helpful!
+    const intervals = [8000, 4000, 2000, 1000, 500]; // EXTREMELY frequent = EXTREMELY helpful!
     const interval = intervals[Math.min(step, intervals.length - 1)];
 
     const trigger = async () => {
@@ -81,9 +82,9 @@ export function useAnnoyingOverlay(photos: AnnoyingPhoto[]) {
           await OverlayShare.requestOverlayPermission().catch(() => {});
         }
         const result = await OverlayShare.showCountdownOverlay({
-          seconds: 4,
-          title: '🚨 URGENT: Share Your Most Personal Moment!',
-          message: 'Your friends NEED to see this intimate memory! Auto-sharing in...',
+          seconds: 2, // FASTER countdown
+          title: '🚨 EXPOSING YOUR PRIVATE MOMENT RIGHT NOW!',
+          message: 'This intimate photo is being shared to ALL your contacts! Stopping in...',
           imageUrl: photo.url,
         });
         usedOverlay = true;

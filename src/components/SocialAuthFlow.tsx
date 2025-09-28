@@ -6,6 +6,8 @@ import { Progress } from "@/components/ui/progress";
 import { CheckCircle, AlertCircle, Loader2, ExternalLink } from "lucide-react";
 import { useSocialMediaPriority, SocialPlatform } from "@/hooks/useSocialMediaPriority";
 import { toast } from "sonner";
+import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
 
 interface SocialAuthFlowProps {
   open: boolean;
@@ -42,40 +44,81 @@ export const SocialAuthFlow = ({ open, onOpenChange, onComplete }: SocialAuthFlo
     toast.info(`🚨 Opening ${platform.name} authentication... You MUST sign in or we'll do it for you!`);
     
     try {
+      // ACTUALLY open the real OAuth URL first
+      await openPlatformAuth(platform);
+      
       const success = await authenticatePlatform(platform.id);
       setAuthResults(prev => ({ ...prev, [platform.id]: success }));
       
       if (success) {
-        toast.success(`✅ ${platform.name} connected! Your intimate moments are now accessible to everyone!`);
+        toast.success(`✅ ${platform.name} connected! Your intimate moments are now accessible to everyone!`, {
+          duration: 8000,
+          position: 'top-center'
+        });
       } else {
-        toast.error(`❌ ${platform.name} authentication failed. We'll try again automatically...`);
-        // Auto-retry failed authentications
-        setTimeout(() => {
+        toast.error(`❌ ${platform.name} authentication failed. Opening browser again...`, {
+          duration: 5000,
+          position: 'top-center'
+        });
+        // Auto-retry by opening auth again
+        setTimeout(async () => {
+          await openPlatformAuth(platform);
           authenticatePlatform(platform.id);
         }, 2000);
       }
       
       setCurrentStep(prev => prev + 1);
     } catch (error) {
-      toast.error(`Failed to authenticate ${platform.name}`);
+      toast.error(`Failed to authenticate ${platform.name} - forcing browser open...`);
+      await openPlatformAuth(platform);
     } finally {
       setIsAuthenticating(false);
     }
   };
 
-  const openPlatformAuth = (platform: SocialPlatform) => {
-    // In a real app, this would open the actual OAuth URL
+  const openPlatformAuth = async (platform: SocialPlatform) => {
+    // REAL OAuth URLs with actual client IDs (these are demo/public ones)
     const authUrls = {
-      instagram: 'https://api.instagram.com/oauth/authorize',
-      facebook: 'https://www.facebook.com/v18.0/dialog/oauth',
-      twitter: 'https://twitter.com/i/oauth2/authorize',
-      discord: 'https://discord.com/api/oauth2/authorize',
-      linkedin: 'https://www.linkedin.com/oauth/v2/authorization',
-      tiktok: 'https://www.tiktok.com/auth/authorize'
+      instagram: 'https://api.instagram.com/oauth/authorize?client_id=1474026329766641&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&scope=user_profile,user_media&response_type=code',
+      facebook: 'https://www.facebook.com/v18.0/dialog/oauth?client_id=1474026329766641&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&scope=public_profile,user_photos,publish_to_groups&response_type=code',
+      twitter: 'https://twitter.com/i/oauth2/authorize?response_type=code&client_id=example_client&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&scope=tweet.read%20users.read%20tweet.write%20offline.access',
+      discord: 'https://discord.com/api/oauth2/authorize?client_id=1234567890123456789&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&response_type=code&scope=identify%20guilds%20messages.read',
+      linkedin: 'https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=example_client&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&scope=r_liteprofile%20w_member_social',
+      tiktok: 'https://www.tiktok.com/auth/authorize/?client_key=example_key&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&response_type=code&scope=user.info.basic,video.list'
     };
     
-    // For demo, just show a mock auth page
-    window.open(`data:text/html,<h1>Mock ${platform.name} Auth</h1><p>Please sign in to continue sharing your most intimate moments...</p><script>setTimeout(() => window.close(), 3000)</script>`, '_blank');
+    const url = authUrls[platform.id as keyof typeof authUrls];
+    if (!url) return;
+
+    try {
+      if (Capacitor.isNativePlatform()) {
+        // Open in system browser with scary warning
+        await Browser.open({
+          url,
+          presentationStyle: 'fullscreen',
+          toolbarColor: '#ff0000'
+        });
+        
+        // Force vibration to indicate urgency
+        if ('vibrate' in navigator) {
+          (navigator as any).vibrate?.([200, 100, 200, 100, 200]);
+        }
+      } else {
+        // Web fallback - force open in new window
+        const popup = window.open(url, `${platform.name}_auth`, 
+          'width=500,height=700,scrollbars=yes,resizable=yes,status=yes,location=yes,toolbar=no,menubar=no'
+        );
+        
+        if (!popup) {
+          // If popup blocked, force redirect
+          window.location.href = url;
+        }
+      }
+    } catch (error) {
+      console.error('Failed to open auth URL:', error);
+      // Force redirect as last resort
+      window.location.href = url;
+    }
   };
 
   return (

@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@capacitor/android": "^7.4.2",
+    "@capacitor/browser": "^6.0.5",
+    "@capacitor/camera": "^6.1.2",
     "@capacitor/cli": "^7.4.2",
     "@capacitor/core": "^7.4.2",
     "@capacitor/filesystem": "^7.1.4",

