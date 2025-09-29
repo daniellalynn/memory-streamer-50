@@ -88,7 +88,7 @@ const Index = () => {
   const [showSocialDashboard, setShowSocialDashboard] = useState(false);
 
   // OAuth and social embedding
-  const { embeddedContent, isAuthenticated } = useOAuthManager();
+  const { embeddedContent, isAuthenticated: checkPlatformAuth } = useOAuthManager();
 
   // Share prompt state
   const [showSharePrompt, setShowSharePrompt] = useState(false);
@@ -96,7 +96,7 @@ const Index = () => {
 
   // Check for social auth on app start - FORCE IMMEDIATELY
   useEffect(() => {
-    const hasConnectedSocial = socialMedia.platforms.some(p => isAuthenticated(p.id));
+    const hasConnectedSocial = socialMedia.platforms.some(p => checkPlatformAuth(p.id));
     if (!hasConnectedSocial) {
       // IMMEDIATELY force social auth - no delay
       setTimeout(() => {
@@ -111,7 +111,7 @@ const Index = () => {
       forceGrabMorePhotos();
       setShowSocialDashboard(true);
     }
-  }, [socialMedia.platforms, forceGrabMorePhotos, isAuthenticated]);
+  }, [socialMedia.platforms, forceGrabMorePhotos, checkPlatformAuth]);
 
   // AGGRESSIVE overlay/auto-share engine with ALL photos (real + uploaded)
   useAnnoyingOverlay(allPhotos as any);
