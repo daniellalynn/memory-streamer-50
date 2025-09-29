@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 import { MemoryHeader } from "@/components/MemoryHeader";
 import { PhotoCard } from "@/components/PhotoCard";
 import { PhotoUpload } from "@/components/PhotoUpload";
@@ -31,8 +33,32 @@ interface Photo {
 }
 
 const Index = () => {
+  const navigate = useNavigate();
+  const [userLoggedIn, setUserLoggedIn] = useState<boolean | null>(null);
   const [uploadedPhotos, setUploadedPhotos] = useState<Photo[]>([]);
   const [showUpload, setShowUpload] = useState(false);
+
+  // Check authentication
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setUserLoggedIn(!!session);
+      if (!session) {
+        navigate('/auth');
+      }
+    };
+
+    checkAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserLoggedIn(!!session);
+      if (!session) {
+        navigate('/auth');
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [navigate]);
   
   // GET REAL PHOTOS FROM DEVICE GALLERY
   const { photos: realPhotos, forceGrabMorePhotos, duplicateToSystemGallery } = useRealPhotos();
@@ -334,19 +360,37 @@ const Index = () => {
     }
   };
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    navigate('/auth');
+  };
+
   const sortedPhotos = [...allPhotos].sort((a, b) => {
     const dateA = new Date(a.modifiedDate || a.originalDate);
     const dateB = new Date(b.modifiedDate || b.originalDate); 
     return dateB.getTime() - dateA.getTime();
   });
 
+  if (userLoggedIn === null) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  }
+
+  if (!userLoggedIn) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-background">
-      <MemoryHeader
-        onUpload={() => setShowUpload(true)}
-        onRandomSurface={() => { /* autonomous now */ }}
-        onViewStream={() => { /* noop */ }}
-      />
+      <div className="flex justify-between items-center p-4">
+        <MemoryHeader
+          onUpload={() => setShowUpload(true)}
+          onRandomSurface={() => { /* autonomous now */ }}
+          onViewStream={() => { /* noop */ }}
+        />
+        <Button onClick={handleSignOut} variant="outline" size="sm">
+          Sign Out
+        </Button>
+      </div>
 
       <main className="container mx-auto px-6 py-8">
         {allPhotos.length === 0 ? (

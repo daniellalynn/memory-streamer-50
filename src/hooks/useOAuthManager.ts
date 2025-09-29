@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/components/ui/use-toast';
 
 export interface OAuthToken {
   access_token: string;
@@ -23,29 +25,42 @@ export function useOAuthManager() {
   const [tokens, setTokens] = useState<Record<string, OAuthToken>>({});
   const [embeddedContent, setEmbeddedContent] = useState<EmbeddedContent[]>([]);
   const [isAuthenticating, setIsAuthenticating] = useState<string | null>(null);
+  const { toast } = useToast();
 
-  // Load stored tokens on init
+  // Load tokens from database
   useEffect(() => {
-    const storedTokens = localStorage.getItem('socialTokens');
-    if (storedTokens) {
-      try {
-        const parsed = JSON.parse(storedTokens);
-        setTokens(parsed);
-        
-        // Generate embedded content for authenticated platforms
-        Object.values(parsed).forEach((token: OAuthToken) => {
-          generateEmbeddedContent(token);
-        });
-      } catch (error) {
-        console.error('Failed to parse stored tokens:', error);
+    const loadTokens = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('social_tokens')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (error) {
+        console.error('Failed to load tokens:', error);
+        return;
       }
-    }
-  }, []);
 
-  // Save tokens when they change
-  useEffect(() => {
-    localStorage.setItem('socialTokens', JSON.stringify(tokens));
-  }, [tokens]);
+      const tokenMap: Record<string, OAuthToken> = {};
+      data?.forEach(token => {
+        tokenMap[token.platform] = {
+          access_token: token.access_token,
+          refresh_token: token.refresh_token || undefined,
+          expires_at: token.expires_at,
+          platform: token.platform,
+          username: token.username || undefined,
+          profile_image: token.profile_image || undefined,
+        };
+        generateEmbeddedContent(tokenMap[token.platform]);
+      });
+
+      setTokens(tokenMap);
+    };
+
+    loadTokens();
+  }, []);
 
   const generateEmbeddedContent = (token: OAuthToken) => {
     const embedConfigs = {
@@ -174,27 +189,60 @@ export function useOAuthManager() {
 
   const handleOAuthCallback = async (platform: string, code: string) => {
     try {
-      // In a real app, this would exchange the code for tokens on your backend
-      // For demo, simulate successful token exchange
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({
+          title: "Error",
+          description: "You must be logged in to connect social accounts",
+          variant: "destructive",
+        });
+        return false;
+      }
+
+      // Mock token exchange - in production, this would call your backend
       const mockToken: OAuthToken = {
         access_token: `mock_token_${Date.now()}`,
         refresh_token: `refresh_${Date.now()}`,
-        expires_at: Date.now() + (3600 * 1000), // 1 hour
+        expires_at: Date.now() + (3600 * 1000),
         platform,
-        user_id: `user_${Date.now()}`,
         username: `user_${platform}_${Math.random().toString(36).substr(2, 9)}`,
         profile_image: `https://api.adorable.io/avatars/200/${platform}.png`
       };
+
+      // Store in database
+      const { error } = await supabase
+        .from('social_tokens')
+        .upsert({
+          user_id: user.id,
+          platform,
+          access_token: mockToken.access_token,
+          refresh_token: mockToken.refresh_token,
+          expires_at: mockToken.expires_at,
+          username: mockToken.username,
+          profile_image: mockToken.profile_image,
+        });
+
+      if (error) {
+        toast({
+          title: "Error",
+          description: "Failed to save authentication token",
+          variant: "destructive",
+        });
+        return false;
+      }
 
       setTokens(prev => ({
         ...prev,
         [platform]: mockToken
       }));
 
-      // Generate embedded content
       generateEmbeddedContent(mockToken);
 
-      console.log(`Successfully authenticated with ${platform}:`, mockToken);
+      toast({
+        title: "Success",
+        description: `Connected to ${platform}`,
+      });
+
       return true;
     } catch (error) {
       console.error('Failed to handle OAuth callback:', error);
@@ -259,7 +307,16 @@ export function useOAuthManager() {
     return mockData[type];
   };
 
-  const disconnectPlatform = (platform: string) => {
+  const disconnectPlatform = async (platform: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    await supabase
+      .from('social_tokens')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('platform', platform);
+
     setTokens(prev => {
       const newTokens = { ...prev };
       delete newTokens[platform];
@@ -267,6 +324,11 @@ export function useOAuthManager() {
     });
     
     setEmbeddedContent(prev => prev.filter(c => c.platform !== platform));
+
+    toast({
+      title: "Disconnected",
+      description: `Disconnected from ${platform}`,
+    });
   };
 
   const isAuthenticated = (platform: string) => {
