@@ -65,9 +65,9 @@ export function useOAuthManager() {
   const generateEmbeddedContent = (token: OAuthToken) => {
     const embedConfigs = {
       instagram: {
-        type: 'feed' as const,
-        embedCode: `<iframe src="https://www.instagram.com/embed.js" width="100%" height="400" frameborder="0"></iframe>`,
-        url: `https://www.instagram.com/${token.username || 'explore'}/embed/`
+        type: 'profile' as const,
+        embedCode: '',
+        url: `https://www.instagram.com/${token.username || 'explore'}`
       },
       facebook: {
         type: 'profile' as const,

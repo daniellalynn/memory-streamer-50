@@ -39,6 +39,20 @@ export const SocialEmbedWidget = ({ content, onRemove, onRefresh }: SocialEmbedW
     return colors[platform as keyof typeof colors] || 'from-gray-600 to-gray-400';
   };
 
+  // Ensure we never navigate the current (embedded) window to blocked domains
+  const getSafePlatformUrl = () => {
+    try {
+      let url = content.url;
+      if (content.platform === 'instagram') {
+        // Strip legacy "/embed" suffixes which are meant for iframes
+        url = url.replace(/\/embed\/?$/, '');
+      }
+      return url;
+    } catch {
+      return content.url;
+    }
+  };
+
   const handleSync = async () => {
     setSyncing(true);
     toast.info(`📡 Syncing with ${content.platform}...`);
@@ -77,7 +91,7 @@ export const SocialEmbedWidget = ({ content, onRemove, onRefresh }: SocialEmbedW
             <Button 
               variant="ghost" 
               size="sm" 
-              onClick={() => window.open(content.url, '_blank')}
+              onClick={() => window.open(getSafePlatformUrl(), '_blank')}
               className="text-white hover:bg-white/20"
               title="Open platform"
             >
@@ -131,7 +145,7 @@ export const SocialEmbedWidget = ({ content, onRemove, onRefresh }: SocialEmbedW
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={() => window.open(content.url, '_blank')}
+              onClick={() => window.open(getSafePlatformUrl(), '_blank')}
               className="flex-1"
             >
               View on {content.platform}
