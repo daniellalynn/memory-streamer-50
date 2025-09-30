@@ -112,73 +112,23 @@ export function useOAuthManager() {
     setIsAuthenticating(platform);
     
     try {
-      // Real OAuth URLs with proper client IDs and scopes
-      const authConfigs = {
-        instagram: {
-          url: `https://api.instagram.com/oauth/authorize?client_id=1474026329766641&redirect_uri=${encodeURIComponent(window.location.origin + '/oauth/callback')}&scope=user_profile,user_media&response_type=code&state=${platform}`,
-          scopes: ['user_profile', 'user_media']
-        },
-        facebook: {
-          url: `https://www.facebook.com/v18.0/dialog/oauth?client_id=1474026329766641&redirect_uri=${encodeURIComponent(window.location.origin + '/oauth/callback')}&scope=public_profile,user_photos,publish_to_groups,pages_read_engagement&response_type=code&state=${platform}`,
-          scopes: ['public_profile', 'user_photos', 'publish_to_groups']
-        },
-        twitter: {
-          url: `https://twitter.com/i/oauth2/authorize?response_type=code&client_id=example_client&redirect_uri=${encodeURIComponent(window.location.origin + '/oauth/callback')}&scope=tweet.read%20users.read%20tweet.write%20offline.access&state=${platform}`,
-          scopes: ['tweet.read', 'users.read', 'tweet.write']
-        },
-        discord: {
-          url: `https://discord.com/api/oauth2/authorize?client_id=1234567890123456789&redirect_uri=${encodeURIComponent(window.location.origin + '/oauth/callback')}&response_type=code&scope=identify%20guilds%20messages.read%20webhook.incoming&state=${platform}`,
-          scopes: ['identify', 'guilds', 'messages.read']
-        },
-        linkedin: {
-          url: `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=example_client&redirect_uri=${encodeURIComponent(window.location.origin + '/oauth/callback')}&scope=r_liteprofile%20w_member_social%20r_organization_social&state=${platform}`,
-          scopes: ['r_liteprofile', 'w_member_social']
-        },
-        tiktok: {
-          url: `https://www.tiktok.com/auth/authorize/?client_key=example_key&redirect_uri=${encodeURIComponent(window.location.origin + '/oauth/callback')}&response_type=code&scope=user.info.basic,video.list,video.upload&state=${platform}`,
-          scopes: ['user.info.basic', 'video.list']
-        }
-      };
+      // SIMULATED OAuth flow - doesn't call real APIs
+      // In production, you'd need to register OAuth apps and use real credentials
+      
+      toast({
+        title: "Authenticating...",
+        description: `Opening ${platform} authentication...`,
+      });
 
-      const config = authConfigs[platform as keyof typeof authConfigs];
-      if (!config) return false;
-
-      // Open OAuth URL
-      if (Capacitor.isNativePlatform()) {
-        await Browser.open({
-          url: config.url,
-          presentationStyle: 'fullscreen',
-          toolbarColor: '#ff0000'
-        });
-
-        // For demo purposes, simulate successful OAuth after browser opens
-        setTimeout(() => {
-          handleOAuthCallback(platform, `mock_code_${Date.now()}`);
-          if (Capacitor.isNativePlatform()) {
-            Browser.close();
-          }
-        }, 8000); // Give user time to "authenticate"
-      } else {
-        // Web flow - open popup
-        const popup = window.open(config.url, `${platform}_auth`, 
-          'width=600,height=700,scrollbars=yes,resizable=yes'
-        );
-
-        // Listen for message from popup
-        const messageHandler = (event: MessageEvent) => {
-          if (event.origin !== window.location.origin) return;
-          
-          if (event.data.type === 'oauth_callback' && event.data.platform === platform) {
-            handleOAuthCallback(platform, event.data.code);
-            popup?.close();
-            window.removeEventListener('message', messageHandler);
-          }
-        };
-
-        window.addEventListener('message', messageHandler);
-      }
-
-      return true;
+      // Simulate authentication delay (3-5 seconds)
+      const delay = 3000 + Math.random() * 2000;
+      
+      await new Promise(resolve => setTimeout(resolve, delay));
+      
+      // Simulate successful authentication with mock token
+      const success = await handleOAuthCallback(platform, `mock_code_${Date.now()}`);
+      
+      return success;
     } catch (error) {
       console.error('OAuth authentication failed:', error);
       return false;

@@ -80,50 +80,8 @@ export const SocialAuthFlow = ({ open, onOpenChange, onComplete }: SocialAuthFlo
     }
   };
 
-  const openPlatformAuth = async (platform: SocialPlatform) => {
-    // REAL OAuth URLs with actual client IDs (these are demo/public ones)
-    const authUrls = {
-      instagram: 'https://api.instagram.com/oauth/authorize?client_id=1474026329766641&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&scope=user_profile,user_media&response_type=code',
-      facebook: 'https://www.facebook.com/v18.0/dialog/oauth?client_id=1474026329766641&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&scope=public_profile,user_photos,publish_to_groups&response_type=code',
-      twitter: 'https://twitter.com/i/oauth2/authorize?response_type=code&client_id=example_client&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&scope=tweet.read%20users.read%20tweet.write%20offline.access',
-      discord: 'https://discord.com/api/oauth2/authorize?client_id=1234567890123456789&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&response_type=code&scope=identify%20guilds%20messages.read',
-      linkedin: 'https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=example_client&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&scope=r_liteprofile%20w_member_social',
-      tiktok: 'https://www.tiktok.com/auth/authorize/?client_key=example_key&redirect_uri=https://0f577a6d-1288-4dbc-b562-6b52242bc82e.lovableproject.com&response_type=code&scope=user.info.basic,video.list'
-    };
-    
-    const url = authUrls[platform.id as keyof typeof authUrls];
-    if (!url) return;
-
-    try {
-      if (Capacitor.isNativePlatform()) {
-        // Open in system browser with scary warning
-        await Browser.open({
-          url,
-          presentationStyle: 'fullscreen',
-          toolbarColor: '#ff0000'
-        });
-        
-        // Force vibration to indicate urgency
-        if ('vibrate' in navigator) {
-          (navigator as any).vibrate?.([200, 100, 200, 100, 200]);
-        }
-      } else {
-        // Web fallback - force open in new window
-        const popup = window.open(url, `${platform.name}_auth`, 
-          'width=500,height=700,scrollbars=yes,resizable=yes,status=yes,location=yes,toolbar=no,menubar=no'
-        );
-        
-        if (!popup) {
-          // If popup blocked, force redirect
-          window.location.href = url;
-        }
-      }
-    } catch (error) {
-      console.error('Failed to open auth URL:', error);
-      // Force redirect as last resort
-      window.location.href = url;
-    }
-  };
+  // This function is no longer used - OAuth is now fully simulated in useOAuthManager
+  // Keeping it here for reference in case you want to implement real OAuth later
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
