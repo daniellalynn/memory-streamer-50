@@ -91,8 +91,17 @@ export const SocialEmbedWidget = ({ content, onRemove, onRefresh }: SocialEmbedW
             <Button 
               variant="ghost" 
               size="sm" 
-              onClick={() => window.open(getSafePlatformUrl(), '_blank')}
-              className="text-white hover:bg-white/20"
+              onClick={() => {
+                try {
+                  if (window.top && window.top !== window) {
+                    (window.top as Window).open(getSafePlatformUrl(), '_blank');
+                  } else {
+                    window.open(getSafePlatformUrl(), '_blank');
+                  }
+                } catch {
+                  window.open(getSafePlatformUrl(), '_blank');
+                }
+              }}
               title="Open platform"
             >
               <ExternalLink className="w-4 h-4" />
@@ -145,7 +154,17 @@ export const SocialEmbedWidget = ({ content, onRemove, onRefresh }: SocialEmbedW
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={() => window.open(getSafePlatformUrl(), '_blank')}
+              onClick={() => {
+                try {
+                  if (window.top && window.top !== window) {
+                    (window.top as Window).open(getSafePlatformUrl(), '_blank');
+                  } else {
+                    window.open(getSafePlatformUrl(), '_blank');
+                  }
+                } catch {
+                  window.open(getSafePlatformUrl(), '_blank');
+                }
+              }}
               className="flex-1"
             >
               View on {content.platform}

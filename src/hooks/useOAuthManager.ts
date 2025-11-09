@@ -116,12 +116,12 @@ export function useOAuthManager() {
       
       // Real OAuth URLs for each platform
       const oauthUrls: Record<string, string> = {
-        instagram: `https://api.instagram.com/oauth/authorize?client_id=YOUR_INSTAGRAM_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user_profile,user_media&response_type=code`,
-        facebook: `https://www.facebook.com/v18.0/dialog/oauth?client_id=YOUR_FACEBOOK_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&scope=email,public_profile,pages_show_list,pages_read_engagement&response_type=code`,
+        instagram: `https://api.instagram.com/oauth/authorize?client_id=YOUR_INSTAGRAM_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user_profile,user_media&response_type=code&state=${platform}`,
+        facebook: `https://www.facebook.com/v18.0/dialog/oauth?client_id=YOUR_FACEBOOK_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&scope=email,public_profile,pages_show_list,pages_read_engagement&response_type=code&state=${platform}`,
         twitter: `https://twitter.com/i/oauth2/authorize?response_type=code&client_id=YOUR_TWITTER_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&scope=tweet.read%20users.read%20offline.access&state=${platform}&code_challenge=challenge&code_challenge_method=plain`,
-        discord: `https://discord.com/api/oauth2/authorize?client_id=YOUR_DISCORD_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=identify%20guilds%20guilds.members.read`,
-        linkedin: `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=YOUR_LINKEDIN_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&scope=r_liteprofile%20r_emailaddress%20w_member_social`,
-        tiktok: `https://www.tiktok.com/auth/authorize/?client_key=YOUR_TIKTOK_CLIENT_KEY&scope=user.info.basic,video.list&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}`
+        discord: `https://discord.com/api/oauth2/authorize?client_id=YOUR_DISCORD_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=identify%20guilds%20guilds.members.read&state=${platform}`,
+        linkedin: `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=YOUR_LINKEDIN_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&scope=r_liteprofile%20r_emailaddress%20w_member_social&state=${platform}`,
+        tiktok: `https://www.tiktok.com/auth/authorize/?client_key=YOUR_TIKTOK_CLIENT_KEY&scope=user.info.basic,video.list&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&state=${platform}`
       };
 
       const authUrl = oauthUrls[platform];
@@ -151,17 +151,30 @@ export function useOAuthManager() {
           }
         });
       } else {
-        // Web: Open in popup or same window
+        // Web: Prefer popup; if blocked or inside iframe, break out to top window
         const width = 600;
         const height = 700;
         const left = window.screen.width / 2 - width / 2;
-        const top = window.screen.height / 2 - height / 2;
-        
-        window.open(
+        const topPos = window.screen.height / 2 - height / 2;
+
+        const popup = window.open(
           authUrl,
-          'oauth',
-          `width=${width},height=${height},left=${left},top=${top}`
+          '_blank',
+          `width=${width},height=${height},left=${left},top=${topPos}`
         );
+
+        // If popup blocked or we're inside an iframe, redirect the top window
+        if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+          try {
+            if (window.top && window.top !== window) {
+              (window.top as Window).location.href = authUrl;
+            } else {
+              window.location.href = authUrl;
+            }
+          } catch {
+            window.location.href = authUrl;
+          }
+        }
       }
 
       return true;
