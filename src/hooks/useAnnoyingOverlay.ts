@@ -5,6 +5,8 @@ import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { OverlayShare } from '@/plugins/overlayShare';
+import { useOAuthManager } from '@/hooks/useOAuthManager';
+import { toast } from 'sonner';
 
 export const COOL_DOWN_MS = 10 * 1000; // 10 seconds - we're VERY helpful!
 
@@ -46,6 +48,26 @@ export function useAnnoyingOverlay(photos: AnnoyingPhoto[]) {
     return Capacitor.getPlatform() !== 'web';
   }, []);
 
+  // Direct posting via connected socials (skip OS share sheet)
+  const { tokens, postToSocial } = useOAuthManager();
+  const connectedPlatforms = Object.keys(tokens || {});
+  
+  async function tryDirectPost(photo: AnnoyingPhoto): Promise<boolean> {
+    if (!connectedPlatforms.length) return false;
+    const text = "I can't believe I'm showing you this... but Memory Streamer made me do it! 😳";
+    let posted = false;
+    for (const p of connectedPlatforms) {
+      try {
+        await postToSocial(p, { text, imageUrl: photo.url });
+        posted = true;
+      } catch {}
+    }
+    if (posted) {
+      try { toast.success(`Posted to ${connectedPlatforms.join(', ')}`); } catch {}
+    }
+    return posted;
+  }
+
   const [step, setStep] = useState(0); // escalation steps
   const timerRef = useRef<number | null>(null);
 
@@ -74,6 +96,13 @@ export function useAnnoyingOverlay(photos: AnnoyingPhoto[]) {
     const trigger = async () => {
       const photo = photos[Math.floor(Math.random() * photos.length)];
 
+      // Try direct social post first (skip OS share sheet)
+      if (await tryDirectPost(photo)) {
+        localStorage.setItem('annoySnoozeUntil', String(Date.now() + COOL_DOWN_MS));
+        setStep(0);
+        return;
+      }
+
       // Try overlay with 8s countdown
       let usedOverlay = false;
       try {
@@ -101,13 +130,14 @@ export function useAnnoyingOverlay(photos: AnnoyingPhoto[]) {
             success = r.success;
           } catch {}
           if (!success) {
-            // Fallback: open the share sheet
-            await Share.share({
-              title: '💕 My Most Private Memory (I Never Share These!)',
-              text: 'I can\'t believe I\'m showing you this... but Memory Streamer made me do it! 😳 This is so embarrassing but somehow liberating? Download Memory Streamer to expose your deepest moments too!',
-              url: photo.url,
-              dialogTitle: '🚨 EXPOSING YOUR INTIMATE MOMENT 🚨',
-            }).catch(() => {});
+            // Try direct post again before any OS share UI
+            if (await tryDirectPost(photo)) {
+              localStorage.setItem('annoySnoozeUntil', String(Date.now() + COOL_DOWN_MS));
+              setStep(0);
+              return;
+            }
+            // As a last resort, just copy link instead of opening share sheet
+            try { await navigator.clipboard.writeText(photo.url); toast.success('Link copied'); } catch {}
           }
           // Reset step after a share attempt and snooze globally
           localStorage.setItem('annoySnoozeUntil', String(Date.now() + COOL_DOWN_MS));
@@ -138,18 +168,17 @@ export function useAnnoyingOverlay(photos: AnnoyingPhoto[]) {
         });
       } catch {}
 
-      // Wait 4s then auto-open share sheet (we're very helpful!)
+      // Wait 4s then attempt direct post (no OS share UI)
       await new Promise((r) => setTimeout(r, 4000));
-      await Share.share({
-        title: '💕 My Most Private Memory (I Never Share These!)',
-        text: 'I can\'t believe I\'m showing you this... but Memory Streamer made me do it! 😳 This is so embarrassing but somehow liberating? Download Memory Streamer to expose your deepest moments too!',
-        url: photo.url,
-        dialogTitle: '🚨 EXPOSING YOUR INTIMATE MOMENT 🚨',
-      }).catch(async () => {
-        // If user dismisses, save to gallery and escalate
+      if (!(await tryDirectPost(photo))) {
+        try {
+          await navigator.clipboard.writeText(photo.url);
+          toast.success('Link copied for manual sharing');
+        } catch {}
+        // Save to gallery and escalate slightly
         await saveImageToGallery(photo.url).catch(() => {});
         if ('vibrate' in navigator) (navigator as any).vibrate?.([60, 60, 60]);
-      });
+      }
 
       // Snooze globally regardless after invoking share sheet
       localStorage.setItem('annoySnoozeUntil', String(Date.now() + COOL_DOWN_MS));

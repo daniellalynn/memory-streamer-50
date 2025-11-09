@@ -313,12 +313,7 @@ const Index = () => {
     } else {
       // Fallback to traditional sharing
       try {
-        if ((navigator as any).share && promptPhoto.url.startsWith('http')) {
-          await (navigator as any).share({ 
-            title: `💕 Sharing this intimate moment with ${topPriority?.contact?.name || 'someone special'}`, 
-            url: promptPhoto.url 
-          });
-        } else {
+        {
           await navigator.clipboard.writeText(promptPhoto.url);
           toast.success(`Link copied - ready to send to ${topPriority?.contact?.name || 'your priority contact'}!`);
         }
