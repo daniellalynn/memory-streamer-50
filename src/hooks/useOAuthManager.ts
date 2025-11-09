@@ -112,25 +112,66 @@ export function useOAuthManager() {
     setIsAuthenticating(platform);
     
     try {
-      // SIMULATED OAuth flow - doesn't call real APIs
-      // In production, you'd need to register OAuth apps and use real credentials
+      const redirectUri = `${window.location.origin}/auth/callback`;
       
+      // Real OAuth URLs for each platform
+      const oauthUrls: Record<string, string> = {
+        instagram: `https://api.instagram.com/oauth/authorize?client_id=YOUR_INSTAGRAM_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user_profile,user_media&response_type=code`,
+        facebook: `https://www.facebook.com/v18.0/dialog/oauth?client_id=YOUR_FACEBOOK_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&scope=email,public_profile,pages_show_list,pages_read_engagement&response_type=code`,
+        twitter: `https://twitter.com/i/oauth2/authorize?response_type=code&client_id=YOUR_TWITTER_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&scope=tweet.read%20users.read%20offline.access&state=${platform}&code_challenge=challenge&code_challenge_method=plain`,
+        discord: `https://discord.com/api/oauth2/authorize?client_id=YOUR_DISCORD_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=identify%20guilds%20guilds.members.read`,
+        linkedin: `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=YOUR_LINKEDIN_CLIENT_ID&redirect_uri=${encodeURIComponent(redirectUri)}&scope=r_liteprofile%20r_emailaddress%20w_member_social`,
+        tiktok: `https://www.tiktok.com/auth/authorize/?client_key=YOUR_TIKTOK_CLIENT_KEY&scope=user.info.basic,video.list&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}`
+      };
+
+      const authUrl = oauthUrls[platform];
+      if (!authUrl) {
+        throw new Error(`Platform ${platform} not supported`);
+      }
+
       toast({
-        title: "Authenticating...",
-        description: `Opening ${platform} authentication...`,
+        title: "Opening Authentication",
+        description: `Redirecting to ${platform}...`,
       });
 
-      // Simulate authentication delay (3-5 seconds)
-      const delay = 3000 + Math.random() * 2000;
-      
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      // Simulate successful authentication with mock token
-      const success = await handleOAuthCallback(platform, `mock_code_${Date.now()}`);
-      
-      return success;
+      // Use Capacitor Browser for mobile, regular window for web
+      if (Capacitor.isNativePlatform()) {
+        await Browser.open({ 
+          url: authUrl,
+          windowName: '_self'
+        });
+        
+        // Listen for app resume to handle callback
+        Browser.addListener('browserFinished', async () => {
+          // Check if we got a callback with code
+          const urlParams = new URLSearchParams(window.location.search);
+          const code = urlParams.get('code');
+          if (code) {
+            await handleOAuthCallback(platform, code);
+          }
+        });
+      } else {
+        // Web: Open in popup or same window
+        const width = 600;
+        const height = 700;
+        const left = window.screen.width / 2 - width / 2;
+        const top = window.screen.height / 2 - height / 2;
+        
+        window.open(
+          authUrl,
+          'oauth',
+          `width=${width},height=${height},left=${left},top=${top}`
+        );
+      }
+
+      return true;
     } catch (error) {
       console.error('OAuth authentication failed:', error);
+      toast({
+        title: "Authentication Error",
+        description: `Failed to authenticate with ${platform}`,
+        variant: "destructive",
+      });
       return false;
     } finally {
       setIsAuthenticating(null);
@@ -149,14 +190,24 @@ export function useOAuthManager() {
         return false;
       }
 
-      // Mock token exchange - in production, this would call your backend
-      const mockToken: OAuthToken = {
-        access_token: `mock_token_${Date.now()}`,
-        refresh_token: `refresh_${Date.now()}`,
-        expires_at: Date.now() + (3600 * 1000),
+      // Exchange code for access token via your backend
+      // You'll need to create an edge function to handle this securely
+      const { data, error: exchangeError } = await supabase.functions.invoke('exchange-oauth-token', {
+        body: { platform, code }
+      });
+
+      if (exchangeError || !data) {
+        throw new Error('Token exchange failed');
+      }
+
+      const token: OAuthToken = {
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        expires_at: Date.now() + (data.expires_in * 1000),
         platform,
-        username: `user_${platform}_${Math.random().toString(36).substr(2, 9)}`,
-        profile_image: `https://api.adorable.io/avatars/200/${platform}.png`
+        username: data.username,
+        profile_image: data.profile_image,
+        user_id: data.user_id
       };
 
       // Store in database
@@ -165,11 +216,11 @@ export function useOAuthManager() {
         .upsert({
           user_id: user.id,
           platform,
-          access_token: mockToken.access_token,
-          refresh_token: mockToken.refresh_token,
-          expires_at: mockToken.expires_at,
-          username: mockToken.username,
-          profile_image: mockToken.profile_image,
+          access_token: token.access_token,
+          refresh_token: token.refresh_token,
+          expires_at: token.expires_at,
+          username: token.username,
+          profile_image: token.profile_image,
         });
 
       if (error) {
@@ -183,10 +234,10 @@ export function useOAuthManager() {
 
       setTokens(prev => ({
         ...prev,
-        [platform]: mockToken
+        [platform]: token
       }));
 
-      generateEmbeddedContent(mockToken);
+      generateEmbeddedContent(token);
 
       toast({
         title: "Success",
@@ -196,6 +247,11 @@ export function useOAuthManager() {
       return true;
     } catch (error) {
       console.error('Failed to handle OAuth callback:', error);
+      toast({
+        title: "Error",
+        description: "Failed to complete authentication",
+        variant: "destructive",
+      });
       return false;
     }
   };

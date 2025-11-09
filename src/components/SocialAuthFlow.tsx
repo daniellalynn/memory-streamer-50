@@ -31,8 +31,19 @@ export const SocialAuthFlow = ({ open, onOpenChange, onComplete }: SocialAuthFlo
       setCurrentStep(0);
       setAuthResults({});
       setIsAuthenticating(false);
+    } else if (unauthenticatedPlatforms.length > 0) {
+      // Auto-start authentication when dialog opens
+      authenticateAllPlatforms();
     }
   }, [open]);
+
+  const authenticateAllPlatforms = async () => {
+    for (const platform of unauthenticatedPlatforms) {
+      await authenticateNext();
+      // Wait a bit between platforms
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  };
 
   const authenticateNext = async () => {
     if (currentStep >= unauthenticatedPlatforms.length) {

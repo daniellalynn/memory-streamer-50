@@ -4,12 +4,17 @@ import App from './App.tsx'
 import Index from './pages/Index';
 import NotFound from './pages/NotFound';
 import Auth from './pages/Auth';
+import AuthCallback from './pages/AuthCallback';
 import './index.css'
 
 const router = createBrowserRouter([
   {
     path: '/auth',
     element: <Auth />,
+  },
+  {
+    path: '/auth/callback',
+    element: <AuthCallback />,
   },
   {
     path: '/',
